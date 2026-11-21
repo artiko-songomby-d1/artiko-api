@@ -32,7 +32,7 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 class Base(DeclarativeBase):
-    """App tables live in the `app` schema."""
+    """App tables live in the `app` schema; Better Auth owns `better_auth`."""
 
     metadata = MetaData(schema="app")
 

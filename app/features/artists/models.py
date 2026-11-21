@@ -11,7 +11,7 @@ class Artist(Base):
     __tablename__ = "artist"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    # Keycloak user id (the JWT `sub`); one artist profile per account.
+    # Better Auth user id (the JWT `sub`); one artist profile per account.
     user_id: Mapped[str] = mapped_column(String, unique=True)
     display_name: Mapped[str] = mapped_column(String(100))
     bio: Mapped[str] = mapped_column(Text, default="")

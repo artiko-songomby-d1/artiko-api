@@ -5,12 +5,13 @@ info:
   description: |
     One API for the Artiko Android app and web app (spec: SOLUTION-6).
 
-    **Sign-in.** Accounts live in Keycloak (OpenID Connect, Authorization Code with PKCE). Every call
-    marked with the `bearer` security scheme needs a short-lived access token (5 min) signed by Keycloak.
-    - Web: Auth.js signs the user in through Keycloak; the Next.js server reads the access token from
-      its HTTP-only session cookie and sends it as `Authorization: Bearer <token>`.
-    - Android: AppAuth runs the same Authorization Code flow with PKCE; send the access token as
-      `Authorization: Bearer <token>` and refresh it before `exp`.
+    **Sign-in.** Accounts live in Better Auth, run by artiko-web. Every call marked with the
+    `bearer` security scheme needs a short-lived JWT (15 min) signed by Better Auth.
+    - Web: `authClient.token()`.
+    - Android: `POST {web}/api/auth/sign-up/email` or `POST {web}/api/auth/sign-in/email`
+      with `{email, password, name?}` → read the `set-auth-token` response header (session
+      token) → `GET {web}/api/auth/token` with `Authorization: Bearer <session token>` →
+      `{token}` is the JWT for this API. Refresh it before `exp`.
 
     **Errors** always have the shape `Error`.
     **Months** are `YYYY-MM` (UTC). **Media URLs** are absolute.

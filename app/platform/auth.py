@@ -1,4 +1,4 @@
-"""Verify the Keycloak access tokens against the realm's JWKS: signature, expiry, issuer and audience."""
+"""Verify the Better Auth JWTs (issued by artiko-web) against its JWKS endpoint."""
 
 import asyncio
 import time
