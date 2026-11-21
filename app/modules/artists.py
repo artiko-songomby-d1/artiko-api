@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from app.features.artists.models import Artist
 from app.features.works.models import Work
-from app.modules.works import WorkOut, to_out, works_query
+from app.features.works.queries import to_out, works_query
+from app.features.works.schemas import WorkOut
 from app.platform.db import Db
 from app.platform.errors import ApiError
 

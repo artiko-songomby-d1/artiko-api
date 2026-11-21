@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.modules import artists, health, me, practices, scan, votes, works
+from app.features.works import router as works
+from app.modules import artists, health, me, practices, scan, votes
 from app.platform.config import get_settings
 from app.platform.errors import install_error_handlers
 

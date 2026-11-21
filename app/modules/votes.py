@@ -8,18 +8,14 @@ from sqlalchemy.exc import IntegrityError
 
 from app.features.artists.models import Artist
 from app.features.votes.models import Vote
+from app.features.works.categories import CategoryId
 from app.features.works.models import Work
-from app.modules.works import (
-    MONTH,
-    CategoryId,
-    WorkOut,
-    current_month,
-    to_out,
-    works_query,
-)
+from app.features.works.queries import to_out, works_query
+from app.features.works.schemas import WorkOut
 from app.platform.auth import User
 from app.platform.db import Db
 from app.platform.errors import ApiError
+from app.platform.months import MONTH, current_month
 
 router = APIRouter(tags=["votes"])
 

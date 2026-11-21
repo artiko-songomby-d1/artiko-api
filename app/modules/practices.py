@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
 from app.features.practices.models import Practice
-from app.modules.works import CategoryId
+from app.features.works.categories import CategoryId
 from app.platform.db import Db
 from app.platform.errors import ApiError
 
