@@ -62,6 +62,23 @@ def test_list_filters(client):
     assert client.get("/api/v1/works?month=2026-13").status_code == 422
 
 
+def test_search_matches_title_story_and_artist_name(client):
+    become_artist(client, "alice", "Rova Arts")
+    become_artist(client, "bob", "Hery Studio")
+    publish(client, "alice", 1, title="Highland light", story="Painted at dawn")
+    publish(client, "alice", 2, title="Rice terraces", story="Mist over the valley")
+    publish(client, "bob", 3, title="Carved gate")
+
+    def titles(q):
+        return sorted(w["title"] for w in client.get("/api/v1/works", params={"q": q}).json())
+
+    assert titles("highland") == ["Highland light"]
+    assert titles("MIST") == ["Rice terraces"]
+    assert titles("hery") == ["Carved gate"]
+    assert titles("nothing like this") == []
+    assert len(client.get("/api/v1/works", params={"q": "%"}).json()) == 0
+
+
 def test_categories(client):
     ids = [c["id"] for c in client.get("/api/v1/categories").json()]
     assert "oral_arts" in ids and len(ids) == 8

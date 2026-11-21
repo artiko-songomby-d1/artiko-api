@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.features.artists.models import Artist
 from app.features.works.models import Vote, Work
@@ -52,6 +52,7 @@ async def search_works(
     month: str | None,
     artist_id: uuid.UUID | None,
     exposition_id: uuid.UUID | None = None,
+    text: str | None = None,
 ) -> list[WorkOut]:
     q = works_query().order_by(Work.created_at.desc())
     if category:
@@ -62,4 +63,12 @@ async def search_works(
         q = q.where(Work.artist_id == artist_id)
     if exposition_id:
         q = q.where(Work.exposition_id == exposition_id)
+    if text:
+        q = q.where(
+            or_(
+                Work.title.icontains(text, autoescape=True),
+                Work.story.icontains(text, autoescape=True),
+                Artist.display_name.icontains(text, autoescape=True),
+            )
+        )
     return [to_out(*row) for row in await db.execute(q)]

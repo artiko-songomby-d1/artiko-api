@@ -119,6 +119,10 @@ paths:
         - { name: month, in: query, schema: { $ref: "#/components/schemas/Month" } }
         - { name: artist_id, in: query, schema: { type: string, format: uuid } }
         - { name: exposition_id, in: query, schema: { type: string, format: uuid } }
+        - name: q
+          in: query
+          description: Words to find in the title, the story or the artist's name, ignoring case
+          schema: { type: string, maxLength: 100 }
       responses:
         "200":
           description: Works, newest first

@@ -26,8 +26,9 @@ async def list_works(
     month: Annotated[str | None, Query(pattern=MONTH)] = None,
     artist_id: uuid.UUID | None = None,
     exposition_id: uuid.UUID | None = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
 ) -> list[WorkOut]:
-    return await search_works(db, category, month, artist_id, exposition_id)
+    return await search_works(db, category, month, artist_id, exposition_id, q)
 
 
 @router.get("/works/{work_id}")
