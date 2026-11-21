@@ -21,3 +21,17 @@ def test_uploaded_media_is_served_with_nosniff_and_a_locked_down_policy(client):
 def test_docs_page_keeps_working(client):
     r = client.get("/docs")
     assert r.status_code == 200 and "content-security-policy" not in r.headers
+
+
+def test_unexpected_errors_return_a_generic_body_without_details(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.features.practices import router as practices
+    from app.main import app
+
+    monkeypatch.setattr(practices, "select", lambda *_: (_ for _ in ()).throw(RuntimeError("secret detail")))
+    r = TestClient(app, raise_server_exceptions=False).get("/api/v1/practices")
+    assert r.status_code == 500
+    assert r.json() == {"error": {"code": "internal_error", "message": "Something went wrong on our side"}}
+    assert "secret" not in r.text
+
