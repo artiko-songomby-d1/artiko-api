@@ -10,8 +10,8 @@ import jwt
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.config import get_settings
-from app.core.errors import ApiError
+from app.platform.config import get_settings
+from app.platform.errors import ApiError
 
 _bearer = HTTPBearer(auto_error=False)
 

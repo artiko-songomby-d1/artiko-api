@@ -1,4 +1,4 @@
-from app.modules import scan
+from app.features.scan import service as scan
 from tests.conftest import become_artist, png, publish
 
 

@@ -14,8 +14,9 @@ import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.embed import DIM
-from app.models import KnownWork, Work
+from app.features.scan.models import KnownWork
+from app.features.works.models import Work
+from app.platform.embed import DIM
 
 
 @dataclass

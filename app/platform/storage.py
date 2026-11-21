@@ -7,8 +7,8 @@ from pathlib import Path
 from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
 
-from app.core.config import get_settings
-from app.core.errors import ApiError
+from app.platform.config import get_settings
+from app.platform.errors import ApiError
 
 # The browser's content type is only a hint: images are decoded and GLB files checked by magic.
 TYPES = {

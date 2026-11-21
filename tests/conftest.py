@@ -27,9 +27,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from app.core import security
-from app.core.config import get_settings
-from app.core.db import Base
+from app.platform import auth as security
+from app.platform import registry  # noqa: F401  registers every table
+from app.platform.config import get_settings
+from app.platform.db import Base
 
 _key = Ed25519PrivateKey.generate()
 
@@ -50,7 +51,7 @@ def _clean_db():
         with engine.begin() as conn:
             conn.execute(text(f"TRUNCATE {tables} CASCADE"))
         engine.dispose()
-    from app.core.index import index
+    from app.features.scan.index import index
 
     index.reset()
     yield

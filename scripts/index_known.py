@@ -12,9 +12,9 @@ import asyncio
 import httpx
 from sqlalchemy import select
 
-from app.core.db import SessionLocal
-from app.core.embed import embed
-from app.models import KnownWork
+from app.features.scan.models import KnownWork
+from app.platform.db import SessionLocal
+from app.platform.embed import embed
 
 COMMONS = "https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=800"
 FAMOUS = [
