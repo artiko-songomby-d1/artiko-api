@@ -57,6 +57,9 @@ def _clean_db():
     from app.features.scan.index import get_index
 
     get_index().reset()
+    from app.features.scan.router import limiter
+
+    limiter.reset()
     yield
 
 

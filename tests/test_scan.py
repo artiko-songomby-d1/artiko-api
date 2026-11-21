@@ -42,3 +42,57 @@ def test_ai_content_credentials(client, monkeypatch):
 def test_not_an_image(client):
     r = send(client, b"hello", "text/plain")
     assert r.status_code == 400 and r.json()["error"]["code"] == "not_an_image"
+
+
+def test_scan_is_rate_limited_per_client(client, monkeypatch):
+    from app.platform.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "scan_rate_limit_per_minute", 2)
+    assert [send(client, png(1)).status_code for _ in range(2)] == [200, 200]
+    blocked = send(client, png(1))
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "rate_limited"
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_scan_rejects_photos_over_its_own_size_limit(client, monkeypatch):
+    from app.platform.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "scan_max_upload_mb", 1)
+    big = png(1, size=(1200, 1200)) + b"\0" * (1024 * 1024)
+    r = send(client, big)
+    assert r.status_code == 413 and r.json()["error"]["code"] == "file_too_large"
+
+
+def test_scan_has_a_global_cap_that_changing_address_cannot_get_around(client, monkeypatch):
+    from app.platform.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "scan_global_rate_limit_per_minute", 2)
+    monkeypatch.setattr(get_settings(), "client_ip_header", "x-real-ip")
+
+    def scan_from(address: str):
+        return client.post(
+            "/api/v1/scan/image",
+            files={"file": ("photo.png", png(1), "image/png")},
+            headers={"X-Real-IP": address},
+        ).status_code
+
+    assert [scan_from(f"198.51.100.{i}") for i in range(3)] == [200, 200, 429]
+
+
+def test_a_client_over_its_own_limit_does_not_use_up_the_global_budget(client, monkeypatch):
+    from app.platform.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "scan_rate_limit_per_minute", 1)
+    monkeypatch.setattr(get_settings(), "scan_global_rate_limit_per_minute", 3)
+    monkeypatch.setattr(get_settings(), "client_ip_header", "x-real-ip")
+
+    def scan_from(address: str):
+        return client.post(
+            "/api/v1/scan/image",
+            files={"file": ("photo.png", png(1), "image/png")},
+            headers={"X-Real-IP": address},
+        ).status_code
+
+    assert [scan_from("198.51.100.1") for _ in range(5)] == [200, 429, 429, 429, 429]
+    assert [scan_from("198.51.100.2"), scan_from("198.51.100.3")] == [200, 200]

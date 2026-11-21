@@ -29,11 +29,12 @@ TYPES = {
 }
 
 
-async def read_upload(file: UploadFile) -> bytes:
-    limit = get_settings().max_upload_mb * 1024 * 1024
+async def read_upload(file: UploadFile, max_mb: int | None = None) -> bytes:
+    max_mb = max_mb or get_settings().max_upload_mb
+    limit = max_mb * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
-        raise PayloadTooLarge("file_too_large", f"{file.filename} is over {get_settings().max_upload_mb} MB")
+        raise PayloadTooLarge("file_too_large", f"{file.filename} is over {max_mb} MB")
     if not data:
         raise BadRequest("empty_file", f"{file.filename} is empty")
     return data

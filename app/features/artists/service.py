@@ -6,6 +6,7 @@ from app.features.artists.models import Artist
 from app.features.artists.schemas import ArtistIn
 from app.platform.db import Db
 from app.platform.errors import NotFound
+from app.platform.pagination import Page
 
 
 async def get_artist(db: Db, artist_id: uuid.UUID) -> Artist:
@@ -15,8 +16,9 @@ async def get_artist(db: Db, artist_id: uuid.UUID) -> Artist:
     return artist
 
 
-async def list_artists(db: Db) -> list[Artist]:
-    return list(await db.scalars(select(Artist).order_by(Artist.display_name)))
+async def list_artists(db: Db, page: Page) -> list[Artist]:
+    q = select(Artist).order_by(Artist.display_name, Artist.id).limit(page.limit).offset(page.offset)
+    return list(await db.scalars(q))
 
 
 async def artist_of_user(db: Db, user_id: str) -> Artist | None:

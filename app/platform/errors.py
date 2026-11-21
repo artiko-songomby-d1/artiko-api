@@ -16,8 +16,8 @@ log = logging.getLogger("artiko.errors")
 class ApiError(Exception):
     status = 500
 
-    def __init__(self, code: str, message: str):
-        self.code, self.message = code, message
+    def __init__(self, code: str, message: str, headers: dict[str, str] | None = None):
+        self.code, self.message, self.headers = code, message, headers or {}
 
 
 class BadRequest(ApiError):
@@ -44,6 +44,17 @@ class PayloadTooLarge(ApiError):
     status = 413
 
 
+class TooManyRequests(ApiError):
+    status = 429
+
+    def __init__(self, code: str, message: str, retry_after: int):
+        super().__init__(code, message, {"Retry-After": str(retry_after)})
+
+
+class ServiceUnavailable(ApiError):
+    status = 503
+
+
 def _body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 
@@ -51,7 +62,7 @@ def _body(code: str, message: str) -> dict:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, e: ApiError):
-        return JSONResponse(_body(e.code, e.message), status_code=e.status)
+        return JSONResponse(_body(e.code, e.message), status_code=e.status, headers=e.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, e: RequestValidationError):

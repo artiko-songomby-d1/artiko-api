@@ -35,6 +35,28 @@ paths:
                 properties:
                   status: { type: string, const: ok }
 
+  /api/v1/ready:
+    get:
+      operationId: ready
+      tags: [health]
+      summary: Readiness probe
+      description: |
+        `/health` only says the process is alive and never touches the database.
+        This one also checks that the database answers.
+      responses:
+        "200":
+          description: The API can serve requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+        "503":
+          description: The database is not reachable (`not_ready`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
   /api/v1/me:
     get:
       operationId: getMe
@@ -72,9 +94,12 @@ paths:
     get:
       operationId: listArtists
       tags: [artists]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Every artist, by name
+          description: Artists by name, one page
           content:
             application/json:
               schema:
@@ -119,9 +144,11 @@ paths:
         - { name: month, in: query, schema: { $ref: "#/components/schemas/Month" } }
         - { name: artist_id, in: query, schema: { type: string, format: uuid } }
         - { name: exposition_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Works, newest first
+          description: Works, newest first, one page
           content:
             application/json:
               schema:
@@ -343,7 +370,9 @@ paths:
       operationId: scanImage
       tags: [scan]
       summary: Identify a photo of an artwork (camera on Android, upload on the web)
-      description: The photo is not stored. Images only, up to 20 MB.
+      description: |
+        The photo is not stored. Images only, up to 5 MB.
+        Each client may scan 20 times a minute; past that the API answers 429 with a `Retry-After` header.
       requestBody:
         required: true
         content:
@@ -361,6 +390,7 @@ paths:
               schema: { $ref: "#/components/schemas/ScanResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
 components:
   securitySchemes:
@@ -370,6 +400,16 @@ components:
       bearerFormat: JWT
 
   parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Page size
+      schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    Offset:
+      name: offset
+      in: query
+      description: Items to skip; request the next page with `offset += limit`
+      schema: { type: integer, minimum: 0, default: 0 }
     ArtistId:
       name: artist_id
       in: path
@@ -394,6 +434,13 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     TooLarge:
       description: File over the size limit (`file_too_large`)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    TooManyRequests:
+      description: Rate limit hit (`rate_limited`); wait `Retry-After` seconds
+      headers:
+        Retry-After:
+          description: Seconds to wait before the next request
+          schema: { type: integer }
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Invalid:
       description: Body or parameters fail validation (`invalid_request`)
