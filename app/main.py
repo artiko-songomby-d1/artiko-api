@@ -1,12 +1,10 @@
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.features.artists.router import router as artists
 from app.features.health.router import router as health
 from app.features.me.router import router as me
+from app.features.media.router import router as media
 from app.features.museum.router import router as museum
 from app.features.practices.router import router as practices
 from app.features.scan.router import router as scan
@@ -34,10 +32,8 @@ def create_app() -> FastAPI:
     install_security_headers(app)
     for router in ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
-
-    Path(settings.media_dir).mkdir(parents=True, exist_ok=True)
-    # shortcut: uploads on local disk, served by the API; move to S3 storage before real users.
-    app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
+    # Files keep the URLs the apps already have (/media/<sha256>.<ext>), whatever the storage.
+    app.include_router(media)
     return app
 
 

@@ -1,8 +1,11 @@
-"""Uploaded files: size cap, type check, SHA-256 fingerprint, saved under MEDIA_DIR."""
+"""Uploaded files: size cap, type check, SHA-256 fingerprint, saved in the bucket or under MEDIA_DIR."""
 
 import hashlib
 import io
+import mimetypes
+import re
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import UploadFile
@@ -73,13 +76,58 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# Stored names are a SHA-256 plus an extension: anything else is never read from storage.
+NAME = re.compile(r"^[0-9a-f]{64}\.[a-z0-9]{2,4}$")
+
+
+@lru_cache
+def bucket_client():
+    """The S3 client for MEDIA_BUCKET, created on first use."""
+    import boto3
+    from botocore.config import Config
+
+    s = get_settings()
+    return boto3.client(
+        "s3",
+        endpoint_url=s.aws_endpoint_url_s3,
+        region_name=s.aws_region,
+        aws_access_key_id=s.aws_access_key_id,
+        aws_secret_access_key=s.aws_secret_access_key,
+        config=Config(s3={"addressing_style": "path"}),
+    )
+
+
+def content_type(name: str) -> str:
+    return mimetypes.guess_type(name)[0] or "application/octet-stream"
+
+
 def save(data: bytes, ext: str) -> str:
-    """Store the bytes under their fingerprint; returns the path relative to MEDIA_DIR."""
+    """Store the bytes under their fingerprint; returns the stored name (served at /media/<name>)."""
     name = f"{sha256(data)}{ext}"
+    bucket = get_settings().media_bucket
+    if bucket:
+        bucket_client().put_object(Bucket=bucket, Key=name, Body=data, ContentType=content_type(name))
+        return name
     path = Path(get_settings().media_dir) / name
     if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     return name
+
+
+def load(name: str) -> bytes | None:
+    """The stored bytes, or None when the name is not a stored file."""
+    if not NAME.match(name):
+        return None
+    bucket = get_settings().media_bucket
+    if bucket:
+        client = bucket_client()
+        try:
+            return client.get_object(Bucket=bucket, Key=name)["Body"].read()
+        except client.exceptions.NoSuchKey:
+            return None
+    path = Path(get_settings().media_dir) / name
+    return path.read_bytes() if path.is_file() else None
 
 
 def media_url(path: str) -> str:

@@ -25,6 +25,20 @@ uv run pytest
 
 Tests run on `TEST_DATABASE_URL` (every table is truncated between tests) and never call the network: the JWT key is generated locally and embeddings use `EMBED_PROVIDER=none`.
 
+## Deploy (Render)
+
+`render.yaml` describes the service: Docker runtime, free plan, Frankfurt, health check on `/api/v1/health`. The image bakes in the CLIP model, and each start runs `alembic upgrade head` before uvicorn. In Render: **New > Blueprint**, pick this repository, then fill in the variables it asks for:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | Neon pooled connection string (database `artiko`) |
+| `AUTH_JWKS_URL` | `https://<web app>/api/auth/jwks` |
+| `AUTH_ISSUER`, `AUTH_AUDIENCE`, `PUBLIC_WEB_URL`, `CORS_ORIGINS` | `https://<web app>` |
+| `PUBLIC_API_URL` | `https://<this service>.onrender.com` |
+| `MEDIA_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Neon Object Storage bucket and its storage credential |
+
+Uploads go to the bucket when `MEDIA_BUCKET` is set (local `MEDIA_DIR` otherwise) and are served by the API at `/media/<sha256>.<ext>`. A free instance sleeps after 15 idle minutes: open `/api/v1/health` a minute before a demo.
+
 ## Layout
 
 One deployable FastAPI app, organised as a modular monolith.

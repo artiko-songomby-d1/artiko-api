@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
 
     media_dir: str = "media"
+    # S3-compatible bucket for uploads (Neon Object Storage). Empty = files stay on local disk in MEDIA_DIR.
+    media_bucket: str = ""
+    aws_endpoint_url_s3: str = ""
+    aws_region: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     # Public base URL of this API, used to build absolute media links for the apps.
     public_api_url: str = "http://localhost:8000"
     max_upload_mb: int = 20
