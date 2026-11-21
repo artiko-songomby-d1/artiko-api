@@ -4,8 +4,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.features.artists import router as artists
+from app.features.health import router as health
+from app.features.me import router as me
+from app.features.museum import router as museum
 from app.features.works import router as works
-from app.modules import artists, health, me, practices, scan, votes
+from app.modules import practices, scan, votes
 from app.platform.config import get_settings
 from app.platform.errors import install_error_handlers
 
@@ -20,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 install_error_handlers(app)
-for module in (health, me, artists, works, votes, practices, scan):
+for module in (health, me, artists, museum, works, votes, practices, scan):
     app.include_router(module.router, prefix="/api/v1")
 
 Path(settings.media_dir).mkdir(parents=True, exist_ok=True)

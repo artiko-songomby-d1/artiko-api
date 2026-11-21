@@ -3,8 +3,8 @@ import math
 import uuid
 from datetime import UTC, datetime
 
+from app.features.museum.layout import layout
 from app.features.works.schemas import WorkOut
-from app.modules.artists import layout
 from tests.conftest import become_artist, publish
 
 
