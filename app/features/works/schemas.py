@@ -1,8 +1,9 @@
+import json
 import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.features.works.categories import CategoryId
 
@@ -12,9 +13,34 @@ class Category(BaseModel):
     label: str
 
 
+MAX_CAMERA_JSON = 2000
+
+
+class ProofClaimIn(BaseModel):
+    """What the client says about one proof file; the server checks every claim before trusting it."""
+
+    source: Literal["in_app", "imported"] = "imported"
+    device_id: uuid.UUID | None = None
+    signature: str | None = Field(None, max_length=200)
+    captured_at_ms: int | None = None
+    draft_id: str | None = Field(None, max_length=64)
+    nonce: str | None = Field(None, max_length=200)
+    integrity_token: str | None = Field(None, max_length=5000)
+    camera: dict | None = None
+
+    @field_validator("camera")
+    @classmethod
+    def small_camera_data(cls, value: dict | None) -> dict | None:
+        if value is not None and len(json.dumps(value)) > MAX_CAMERA_JSON:
+            raise ValueError("camera data is too large")
+        return value
+
+
 class ProofOut(BaseModel):
     id: uuid.UUID
     visibility: Literal["public", "reviewers"]
+    source: Literal["in_app", "imported"]
+    signed: bool
     url: str
 
 

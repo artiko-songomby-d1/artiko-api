@@ -2,23 +2,36 @@ import uuid
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, Query, Response, UploadFile
+from pydantic import TypeAdapter, ValidationError
 
 from app.features.works import service
 from app.features.works.categories import CATEGORIES, CategoryId
+from app.features.works.checks import ProofClaim
 from app.features.works.models import Work, WorkProof
 from app.features.works.proofs import PUBLIC, REVIEWERS, proof_url
 from app.features.works.queries import load_work, search_works, works_query
-from app.features.works.schemas import Category, ProofOut, WorkOut
+from app.features.works.schemas import Category, ProofClaimIn, ProofOut, WorkOut
 from app.platform import signed_links, storage
 from app.platform.auth import OptionalUser, User
 from app.platform.config import get_settings
 from app.platform.db import Db
-from app.platform.errors import Forbidden, NotFound
+from app.platform.errors import BadRequest, Forbidden, NotFound
 from app.platform.months import MONTH
 from app.platform.pagination import Paged
 from app.platform.rate_limit import SlidingWindowLimiter, limit_per_minute
 
 router = APIRouter(tags=["works"])
+claims_adapter = TypeAdapter(list[ProofClaimIn])
+
+
+def parse_claims(raw: str | None) -> list[ProofClaim | None] | None:
+    """The JSON list of claims sent next to the proof files, one per file, in the same order."""
+    if raw is None:
+        return None
+    try:
+        return [ProofClaim(**c.model_dump()) for c in claims_adapter.validate_json(raw)]
+    except ValidationError as e:
+        raise BadRequest("invalid_proof_claims", "proof_claims must be a JSON list of valid claims") from e
 proof_limiter = SlidingWindowLimiter()
 
 
@@ -56,12 +69,14 @@ async def create_work(
     ai_declared: Annotated[bool, Form()] = False,
     exposition_id: Annotated[uuid.UUID | None, Form()] = None,
     proof_visibility: Annotated[Literal["public", "reviewers"], Form()] = REVIEWERS,
+    proof_claims: Annotated[str | None, Form(max_length=20000)] = None,
     proof: Annotated[list[UploadFile] | None, File()] = None,
 ) -> WorkOut:
     work = await service.publish_work(
         db, user, title=title, story=story, category=category,
         ai_declared=ai_declared, exposition_id=exposition_id, file=file, proof=proof or [],
         proof_visibility=proof_visibility,
+        proof_claims=parse_claims(proof_claims),
     )
     return await load_work(db, work.id, user)
 
@@ -75,7 +90,7 @@ async def list_proofs(work_id: uuid.UUID, db: Db, user: User) -> list[ProofOut]:
         raise NotFound("work_not_found", "No work with this id")
     work, _artist_name, _votes, owner_user_id = row
     return [
-        ProofOut(id=p.id, visibility=p.visibility, url=url)
+        ProofOut(id=p.id, visibility=p.visibility, source=p.source, signed=p.signed, url=url)
         for p in work.proofs
         if (url := proof_url(p, owner_user_id, user))
     ]
