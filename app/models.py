@@ -31,6 +31,18 @@ class Artist(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Exposition(Base):
+    """A named group of one artist's works."""
+
+    __tablename__ = "exposition"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    artist_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("artist.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Work(Base):
     __tablename__ = "work"
 
@@ -46,6 +58,9 @@ class Work(Base):
     ai_declared: Mapped[bool] = mapped_column(Boolean, default=False)
     human_proven: Mapped[bool] = mapped_column(Boolean, default=False)
     month: Mapped[str] = mapped_column(String(7), index=True)
+    exposition_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("exposition.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     # CLIP image embedding (512 floats, normalized); null for audio and video.
     embedding: Mapped[list[float] | None] = mapped_column(ARRAY(REAL), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
