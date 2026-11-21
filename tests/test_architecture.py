@@ -48,6 +48,7 @@ ALLOWED = {
     "scan": {"works"},
     "me": {"artists"},
     "health": set(),
+    "media": set(),
 }
 
 

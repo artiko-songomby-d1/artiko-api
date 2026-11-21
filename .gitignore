@@ -5,6 +5,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
-media/
-models/
+/media/
+/models/
 tests/.media/
