@@ -76,3 +76,26 @@ def client():
     from app.main import app
 
     return TestClient(app)
+
+
+def png(seed: int, size: tuple[int, int] = (64, 48)) -> bytes:
+    """A small, distinct PNG per seed."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", size, ((seed * 37) % 256, (seed * 91) % 256, (seed * 53) % 256)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def become_artist(client, user_id: str, name: str = "Rova Arts") -> str:
+    r = client.put("/api/v1/me/artist", json={"display_name": name}, headers=auth(user_id))
+    return r.json()["id"]
+
+
+def publish(client, user_id: str, seed: int, proofs: int = 2, **form) -> dict:
+    files = [("file", (f"w{seed}.png", png(seed), "image/png"))]
+    files += [("proof", (f"p{seed}-{i}.png", png(1000 + seed * 10 + i), "image/png")) for i in range(proofs)]
+    data = {"title": f"Work {seed}", "category": "painting", **form}
+    return client.post("/api/v1/works", data=data, files=files, headers=auth(user_id))
