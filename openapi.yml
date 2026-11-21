@@ -176,6 +176,11 @@ paths:
                 story: { type: string, maxLength: 5000, default: "" }
                 category: { $ref: "#/components/schemas/CategoryId" }
                 ai_declared: { type: boolean, default: false }
+                proof_visibility:
+                  type: string
+                  enum: [public, reviewers]
+                  default: reviewers
+                  description: Who may open the proof files; `reviewers` keeps them private to the artist and the reviewers
                 exposition_id:
                   type: string
                   format: uuid
@@ -210,6 +215,43 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Work" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/works/{work_id}/proofs:
+    parameters:
+      - { name: work_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listWorkProofs
+      tags: [works]
+      summary: The proofs the caller may open, with fresh links
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Public proofs for everyone, private ones for the owner and the reviewers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Proof" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/proofs/{proof_id}/file:
+    parameters:
+      - { name: proof_id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: exp, in: query, required: true, schema: { type: integer }, description: Unix time when the link expires }
+      - { name: sig, in: query, required: true, schema: { type: string }, description: Signature issued with the link }
+    get:
+      operationId: getProofFile
+      tags: [works]
+      summary: A proof file, for the holder of a valid signed link
+      responses:
+        "200":
+          description: The file
+          content:
+            "*/*": { schema: { type: string, format: binary } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/expositions:
     get:
@@ -507,6 +549,14 @@ components:
       type: string
       enum: [image, audio, video, model]
 
+    Proof:
+      type: object
+      required: [id, visibility, url]
+      properties:
+        id: { type: string, format: uuid }
+        visibility: { type: string, enum: [public, reviewers] }
+        url: { type: string, format: uri }
+
     Work:
       type: object
       required:
@@ -537,6 +587,7 @@ components:
         media_kind: { $ref: "#/components/schemas/MediaKind" }
         proof_urls:
           type: array
+          description: The proofs the caller may open; private ones are short-lived signed links, for the owner and reviewers only
           items: { type: string, format: uri }
         sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         human_proven: { type: boolean, description: "Human-made badge: proof of process, not AI-declared" }

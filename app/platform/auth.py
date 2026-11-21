@@ -65,6 +65,12 @@ class CurrentUser:
     id: str
     email: str | None
     name: str | None
+    # Better Auth role claim: "reviewer" may open private proofs and work the review queue.
+    role: str | None = None
+
+    @property
+    def is_reviewer(self) -> bool:
+        return self.role == "reviewer"
 
 
 async def decode_token(token: str) -> CurrentUser:
@@ -80,7 +86,7 @@ async def decode_token(token: str) -> CurrentUser:
         )
     except jwt.PyJWTError as e:
         raise Unauthorized("invalid_token", f"Invalid token: {e}") from e
-    return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"))
+    return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"), role=claims.get("role"))
 
 
 async def current_user(
@@ -91,4 +97,12 @@ async def current_user(
     return await decode_token(creds.credentials)
 
 
+async def optional_user(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> CurrentUser | None:
+    """The signed-in user, or None for an anonymous visitor; a token that is present but wrong still answers 401."""
+    return None if creds is None else await decode_token(creds.credentials)
+
+
 User = Annotated[CurrentUser, Depends(current_user)]
+OptionalUser = Annotated[CurrentUser | None, Depends(optional_user)]

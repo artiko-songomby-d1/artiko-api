@@ -20,6 +20,7 @@ if not _test_url:
 os.environ["DATABASE_URL"] = _test_url
 os.environ["DB_POOL"] = "false"
 os.environ["EMBED_PROVIDER"] = "none"
+os.environ["PROOF_URL_SECRET"] = "test-secret-not-for-production"
 os.environ["MEDIA_DIR"] = str(Path(__file__).parent / ".media")
 # A developer's .env may name the real bucket: tests always use local disk.
 os.environ["MEDIA_BUCKET"] = ""
