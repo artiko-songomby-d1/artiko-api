@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
-from app.models import Practice
+from app.features.practices.models import Practice
 from app.modules.works import CategoryId
 from app.platform.db import Db
 from app.platform.errors import ApiError

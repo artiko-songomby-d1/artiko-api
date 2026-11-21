@@ -15,7 +15,10 @@ from PIL import Image, ImageDraw
 from sqlalchemy import delete, select
 
 from app.core.embed import embed
-from app.models import Artist, Practice, Vote, Work
+from app.features.artists.models import Artist
+from app.features.practices.models import Practice
+from app.features.votes.models import Vote
+from app.features.works.models import Work
 from app.modules.works import current_month
 from app.platform import storage
 from app.platform.db import SessionLocal

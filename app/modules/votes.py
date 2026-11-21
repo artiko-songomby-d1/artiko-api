@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Artist, Vote, Work
+from app.features.artists.models import Artist
+from app.features.votes.models import Vote
+from app.features.works.models import Work
 from app.modules.works import (
     MONTH,
     CategoryId,

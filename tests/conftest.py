@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from app.platform import auth as security
+from app.platform import registry  # noqa: F401  registers every table
 from app.platform.config import get_settings
 from app.platform.db import Base
 

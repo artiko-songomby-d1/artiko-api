@@ -1,4 +1,4 @@
-from app.models import Work
+from app.features.works.models import Work
 from app.modules.works import current_month
 from tests.conftest import auth, become_artist, publish
 

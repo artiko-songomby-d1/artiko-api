@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.core.c2pa_check import ai_generator
 from app.core.embed import embed
 from app.core.index import index
-from app.models import KnownWork
+from app.features.scan.models import KnownWork
 from app.modules.works import WorkOut, load_work
 from app.platform import storage
 from app.platform.config import get_settings

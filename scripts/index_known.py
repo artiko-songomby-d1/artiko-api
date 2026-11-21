@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy import select
 
 from app.core.embed import embed
-from app.models import KnownWork
+from app.features.scan.models import KnownWork
 from app.platform.db import SessionLocal
 
 COMMONS = "https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=800"
