@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = ""  # Neon connection string, from .env
+    # Neon connection string, from .env. No default: the app refuses to start without a database.
+    database_url: str
     # TestClient runs each request on a fresh event loop, so pooled connections must be off there.
     db_pool: bool = True
 
