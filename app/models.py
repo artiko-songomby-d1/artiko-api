@@ -61,3 +61,16 @@ class Vote(Base):
     category: Mapped[str] = mapped_column(String(20))
     month: Mapped[str] = mapped_column(String(7))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Practice(Base):
+    __tablename__ = "practice"
+
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)  # slug, e.g. "kabary"
+    name: Mapped[str] = mapped_column(String(100))
+    region: Mapped[str] = mapped_column(String(100))
+    category: Mapped[str] = mapped_column(String(20))
+    practitioners: Mapped[int]
+    learners: Mapped[int]
+    median_age: Mapped[int]
+    description: Mapped[str] = mapped_column(Text, default="")
