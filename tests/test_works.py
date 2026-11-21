@@ -43,7 +43,7 @@ def test_fake_image_rejected(client):
 
 
 def test_too_large_rejected(client, monkeypatch):
-    from app.core.config import get_settings
+    from app.platform.config import get_settings
 
     monkeypatch.setattr(get_settings(), "max_upload_mb", 0)
     become_artist(client, "alice")

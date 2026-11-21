@@ -1,5 +1,3 @@
-"""Every table of the `app` schema."""
-
 import uuid
 from datetime import datetime
 
@@ -16,19 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.db import Base
-
-
-class Artist(Base):
-    __tablename__ = "artist"
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    # Better Auth user id (the JWT `sub`); one artist profile per account.
-    user_id: Mapped[str] = mapped_column(String, unique=True)
-    display_name: Mapped[str] = mapped_column(String(100))
-    bio: Mapped[str] = mapped_column(Text, default="")
-    region: Mapped[str] = mapped_column(String(100), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+from app.platform.db import Base
 
 
 class Exposition(Base):
@@ -67,6 +53,8 @@ class Work(Base):
 
 
 class Vote(Base):
+    """A vote is part of the works aggregate: works count their votes, the votes feature enforces the rules."""
+
     __tablename__ = "vote"
     __table_args__ = (UniqueConstraint("user_id", "category", "month", name="one_vote_per_category_month"),)
 
@@ -76,31 +64,3 @@ class Vote(Base):
     category: Mapped[str] = mapped_column(String(20))
     month: Mapped[str] = mapped_column(String(7))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class Practice(Base):
-    __tablename__ = "practice"
-
-    id: Mapped[str] = mapped_column(String(60), primary_key=True)  # slug, e.g. "kabary"
-    name: Mapped[str] = mapped_column(String(100))
-    region: Mapped[str] = mapped_column(String(100))
-    category: Mapped[str] = mapped_column(String(20))
-    practitioners: Mapped[int]
-    learners: Mapped[int]
-    median_age: Mapped[int]
-    description: Mapped[str] = mapped_column(Text, default="")
-
-
-class KnownWork(Base):
-    """A public-domain work from an open museum collection, for the scan's 'known work' answer."""
-
-    __tablename__ = "known_work"
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    title: Mapped[str] = mapped_column(String(300))
-    artist_name: Mapped[str] = mapped_column(String(200))
-    date: Mapped[str] = mapped_column(String(100), default="")
-    museum: Mapped[str] = mapped_column(String(200))
-    source_url: Mapped[str] = mapped_column(String, unique=True)
-    image_url: Mapped[str] = mapped_column(String)
-    embedding: Mapped[list[float]] = mapped_column(ARRAY(REAL))

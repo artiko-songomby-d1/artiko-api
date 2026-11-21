@@ -9,13 +9,15 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 
 import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.embed import DIM
-from app.models import KnownWork, Work
+from app.features.scan.models import KnownWork
+from app.features.works.models import Work
+from app.platform.embed import DIM
 
 
 @dataclass
@@ -73,4 +75,6 @@ class Index:
         return ("work", w_id, w_score) if w_score >= k_score else ("known", k_id, k_score)
 
 
-index = Index()
+@lru_cache
+def get_index() -> Index:
+    return Index()

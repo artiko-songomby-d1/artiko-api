@@ -14,11 +14,13 @@ import random
 from PIL import Image, ImageDraw
 from sqlalchemy import delete, select
 
-from app.core import storage
-from app.core.db import SessionLocal
-from app.core.embed import embed
-from app.models import Artist, Exposition, Practice, Vote, Work
-from app.modules.works import current_month
+from app.features.artists.models import Artist
+from app.features.practices.models import Practice
+from app.features.works.models import Exposition, Vote, Work
+from app.platform import storage
+from app.platform.db import get_sessionmaker
+from app.platform.embed import embed
+from app.platform.months import current_month
 
 PRACTICES = [
     ("kabary", "Kabary", "Madagascar", "oral_arts", 120, 30, 63,
@@ -59,7 +61,7 @@ def placeholder(seed: int, palette: str) -> bytes:
 
 
 async def main() -> None:
-    async with SessionLocal() as db:
+    async with get_sessionmaker()() as db:
         for pid, name, region, category, practitioners, learners, age, description in PRACTICES:
             await db.merge(Practice(id=pid, name=name, region=region, category=category, practitioners=practitioners,
                                     learners=learners, median_age=age, description=description))

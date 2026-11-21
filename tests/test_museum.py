@@ -3,14 +3,14 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-from app.modules.artists import layout
-from app.modules.works import WorkOut
+from app.features.museum.layout import layout
+from app.features.works.schemas import WorkOut
 from tests.conftest import become_artist, publish
 
 
 def fake(kind: str) -> WorkOut:
     return WorkOut(
-        id=uuid.uuid4(), artist_id=uuid.uuid4(), artist_name="A", title="T", story="", category="painting",
+        id=uuid.uuid4(), artist_id=uuid.uuid4(), artist_name="A", title="T", story="", category="painting", exposition_id=None,
         media_url="http://x/m", media_kind=kind, proof_urls=[], sha256="0" * 64, human_proven=True,
         ai_declared=False, month="2026-11", created_at=datetime.now(UTC), votes=0,
     )

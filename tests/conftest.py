@@ -27,9 +27,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from app.core import security
-from app.core.config import get_settings
-from app.core.db import Base
+from app.platform import auth as security
+from app.platform import registry  # noqa: F401  registers every table
+from app.platform.config import get_settings
+from app.platform.db import Base
 
 _key = Ed25519PrivateKey.generate()
 
@@ -38,8 +39,8 @@ _key = Ed25519PrivateKey.generate()
 def _migrate():
     subprocess.run(["alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parents[1])
     # The test key stands in for Better Auth's JWKS; no network call is ever made.
-    security.jwks.keys = {"test": _key.public_key()}
-    security.jwks.fetched = time.monotonic() + 10**9
+    security.get_jwks().keys = {"test": _key.public_key()}
+    security.get_jwks().fetched = time.monotonic() + 10**9
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +51,9 @@ def _clean_db():
         with engine.begin() as conn:
             conn.execute(text(f"TRUNCATE {tables} CASCADE"))
         engine.dispose()
-    from app.core.index import index
+    from app.features.scan.index import get_index
 
-    index.reset()
+    get_index().reset()
     yield
 
 

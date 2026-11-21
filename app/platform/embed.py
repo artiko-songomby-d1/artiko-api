@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from app.core.config import get_settings
+from app.platform.config import get_settings
 
 DIM = 512
 _MEAN = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)

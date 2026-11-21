@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from app.core.config import get_settings
+from app.platform.config import get_settings
 
 URL = "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx"
 ATTEMPTS = 20
