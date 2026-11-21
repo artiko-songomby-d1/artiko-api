@@ -179,6 +179,16 @@ paths:
                 story: { type: string, maxLength: 5000, default: "" }
                 category: { $ref: "#/components/schemas/CategoryId" }
                 ai_declared: { type: boolean, default: false }
+                proof_claims:
+                  type: string
+                  description: |
+                    JSON list with one claim per proof file, in the same order. A claim is
+                    `{source: "in_app" | "imported"}`; an in-app capture adds `device_id`, `signature`
+                    (base64 DER ECDSA P-256 over `<sha256>|<captured_at_ms>|<draft_id>|<nonce>`),
+                    `captured_at_ms`, `draft_id`, optional `nonce`, `integrity_token` and `camera`.
+                    Only verified in-app captures count for the human-made badge. Errors (400):
+                    `bad_signature`, `unknown_device`, `capture_too_old` (older than 10 minutes),
+                    `capture_in_future`, `integrity_failed`, `incomplete_capture`, `invalid_proof_claims`.
                 proof_visibility:
                   type: string
                   enum: [public, reviewers]
@@ -218,6 +228,46 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Work" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/devices/challenge:
+    get:
+      operationId: getDeviceChallenge
+      tags: [devices]
+      summary: The nonce a phone puts into its key attestation
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: A nonce signed for this user, valid for ten minutes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Challenge" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/devices:
+    post:
+      operationId: registerDevice
+      tags: [devices]
+      summary: Register the attested hardware key of a phone
+      description: |
+        The key is generated in the Android Keystore with the nonce as attestation challenge. The server
+        checks the certificate chain up to Google's attestation roots, that the attested key is the
+        registered key, that the challenge is the nonce, and that the key is hardware-backed.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceIn" }
+      responses:
+        "201":
+          description: The device (registering the same key again returns it)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/works/{work_id}/proofs:
     parameters:
@@ -553,12 +603,40 @@ components:
       type: string
       enum: [image, audio, video, model]
 
+    Challenge:
+      type: object
+      required: [nonce, expires_at]
+      properties:
+        nonce: { type: string }
+        expires_at: { type: string, format: date-time }
+
+    DeviceIn:
+      type: object
+      required: [nonce, public_key, attestation_chain]
+      properties:
+        nonce: { type: string, maxLength: 200 }
+        public_key: { type: string, description: Base64 DER SubjectPublicKeyInfo of the P-256 key }
+        attestation_chain:
+          type: array
+          maxItems: 10
+          description: Base64 DER certificates, leaf first
+          items: { type: string }
+
+    Device:
+      type: object
+      required: [id, attestation_level]
+      properties:
+        id: { type: string, format: uuid }
+        attestation_level: { type: string, enum: [strongbox, tee, software, unverified] }
+
     Proof:
       type: object
-      required: [id, visibility, url]
+      required: [id, visibility, source, signed, url]
       properties:
         id: { type: string, format: uuid }
         visibility: { type: string, enum: [public, reviewers] }
+        source: { type: string, enum: [in_app, imported], description: Imported files never count for the badge }
+        signed: { type: boolean, description: The capture's signature, device and integrity verdict were verified }
         url: { type: string, format: uri }
 
     Work:

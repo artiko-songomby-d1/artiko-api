@@ -34,3 +34,46 @@ async def run_publish_checks(db: Db, candidate: Candidate) -> uuid.UUID | None:
     for check in _checks:
         earlier = await check(db, candidate) or earlier
     return earlier
+
+
+@dataclass(frozen=True)
+class ProofClaim:
+    """What the client says about one proof file."""
+
+    source: str  # "in_app" (captured with the app's camera) or "imported" (picked from the gallery)
+    device_id: uuid.UUID | None = None
+    signature: str | None = None
+    captured_at_ms: int | None = None
+    draft_id: str | None = None
+    nonce: str | None = None
+    integrity_token: str | None = None
+    camera: dict | None = None
+
+
+@dataclass(frozen=True)
+class ProofEvidence:
+    """What the server verified about one proof file."""
+
+    source: str
+    signed: bool
+    captured_at_ms: int | None = None
+    device_id: uuid.UUID | None = None
+    draft_id: str | None = None
+    nonce: str | None = None
+    camera: dict | None = None
+    integrity_verdict: str | None = None
+
+
+ProofVerifier = Callable[[Db, str, str, ProofClaim], Awaitable[ProofEvidence]]
+_verifier: list[ProofVerifier] = []
+
+
+def register_proof_verifier(verifier: ProofVerifier) -> None:
+    _verifier[:] = [verifier]
+
+
+async def verify_proof(db: Db, user_id: str, sha256: str, claim: ProofClaim | None) -> ProofEvidence:
+    """Raises when the claim is false. Without a claim, or without a verifier, a proof is imported and unsigned."""
+    if claim is None or not _verifier:
+        return ProofEvidence(source="imported", signed=False)
+    return await _verifier[0](db, user_id, sha256, claim)

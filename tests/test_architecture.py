@@ -44,6 +44,7 @@ ALLOWED = {
     "practices": {"works"},
     "works": {"artists"},
     "review": set(),
+    "devices": {"works"},
     "integrity": {"works", "scan", "review"},
     "expositions": {"works", "artists"},
     "votes": {"works", "artists"},

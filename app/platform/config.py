@@ -51,6 +51,22 @@ class Settings(BaseSettings):
     publish_duplicate_threshold: float = 0.92
     # ...or when its perceptual hash differs by at most this many of 64 bits (crops, resizes, recompression).
     publish_phash_max_distance: int = 8
+    # Secret that signs the server nonces a phone puts into its key attestation. Empty = devices cannot register.
+    nonce_secret: str = ""
+    # "chain" verifies the Android key attestation chain against Google's roots; "none" accepts any chain (tests, demo).
+    attestation_provider: str = "chain"
+    # Extra PEM roots trusted besides Google's (private test CAs only).
+    attestation_extra_roots_pem: str = ""
+    # "none" accepts every integrity token except the literal "fail"; no other provider is implemented yet.
+    integrity_provider: str = "none"
+    # Transition switch, true until the Android app can capture signed proof: imported proof files still count for
+    # the badge, as before. Set it to false to enforce the rule (only verified in-app captures count).
+    allow_imported_proofs_for_badge: bool = True
+    # A signed capture must reach the server within this many minutes of being taken.
+    capture_max_age_minutes: int = 10
+    # Device registration and nonce requests per client per minute.
+    device_rate_limit_per_minute: int = 20
+    device_global_rate_limit_per_minute: int = 200
     # "clip" runs the ONNX model; "none" gives a deterministic stand-in vector (tests, no model).
     embed_provider: str = "clip"
 

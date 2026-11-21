@@ -11,7 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.platform.db import Base
@@ -68,6 +68,17 @@ class WorkProof(Base):
     work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id", ondelete="CASCADE"), index=True)
     path: Mapped[str] = mapped_column(String)
     visibility: Mapped[str] = mapped_column(String(10), default="reviewers")
+    # "in_app": captured with the app's camera; "imported": picked from the gallery (never counts for the badge).
+    source: Mapped[str] = mapped_column(String(10), default="imported")
+    # True when the capture's signature, device and integrity verdict were all verified.
+    signed: Mapped[bool] = mapped_column(Boolean, default=False)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("device.id", ondelete="SET NULL"), nullable=True)
+    draft_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nonce: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Camera id, lens and sensor characteristics, kept to check later that captures came from one camera.
+    camera: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    integrity_verdict: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
