@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -37,7 +38,7 @@ _key = Ed25519PrivateKey.generate()
 
 @pytest.fixture(scope="session", autouse=True)
 def _migrate():
-    subprocess.run(["alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parents[1])
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parents[1])
     # The test key stands in for Better Auth's JWKS; no network call is ever made.
     security.get_jwks().keys = {"test": _key.public_key()}
     security.get_jwks().fetched = time.monotonic() + 10**9

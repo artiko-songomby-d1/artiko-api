@@ -33,3 +33,16 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F: pycodestyle, pyflakes. I: imports. B: bugbear. UP: modern syntax. S: bandit security. ASYNC: blocking calls in async code. SIM/C4: simplifications.
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "C4"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]  # asserts and fake credentials are normal in tests
+"tests/conftest.py" = ["E402"]  # the test database URL must be set before the app is imported
+"scripts/*" = ["S311", "S113"]  # demo seeding: non-crypto randomness, one-off HTTP calls
