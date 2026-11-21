@@ -83,10 +83,8 @@ async def main() -> None:
             await db.flush()
             for i in range(5):
                 data = placeholder(a * 100 + i, category)
-                proofs = [
-                    WorkProof(path=storage.save(placeholder(a * 100 + i + 50 + p, category), ".jpg"), visibility="public")
-                    for p in range(2)
-                ]
+                proof_paths = [storage.save(placeholder(a * 100 + i + 50 + p, category), ".jpg") for p in range(2)]
+                proofs = [WorkProof(path=path, visibility="public") for path in proof_paths]
                 work = Work(artist_id=artist.id, exposition_id=expositions[i // 3].id,
                             title=f"{name.split()[0]} study {i + 1}", story=f"Demo work {i + 1} by {name}.",
                             category=category,
