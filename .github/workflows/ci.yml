@@ -6,6 +6,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A throwaway Postgres for the tests; dev and production use Neon.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: artiko
+          POSTGRES_PASSWORD: artiko
+          POSTGRES_DB: artiko_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U artiko" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://artiko:artiko@localhost:5432/artiko_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -13,4 +26,4 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff check .
-      - run: uv run pytest
+      - run: uv run pytest -q
