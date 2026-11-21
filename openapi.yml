@@ -493,6 +493,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >-
+        Better Auth JWT from the web app (`/api/auth/token`). Its `emailVerified` claim must be true:
+        any other token gets 403 `email_not_verified`.
 
   parameters:
     Limit:

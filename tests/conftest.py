@@ -87,6 +87,7 @@ def make_token(user_id: str, **claims) -> str:
         "iss": s.auth_issuer,
         "aud": s.auth_audience,
         "exp": int(time.time()) + 600,
+        "emailVerified": True,
         **claims,
     }
     return jwt.encode(payload, _key, algorithm="EdDSA", headers={"kid": "test"})

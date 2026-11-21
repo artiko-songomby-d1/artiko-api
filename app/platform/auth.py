@@ -12,7 +12,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.platform.config import get_settings
-from app.platform.errors import Unauthorized
+from app.platform.errors import Forbidden, Unauthorized
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -86,6 +86,10 @@ async def decode_token(token: str) -> CurrentUser:
         )
     except jwt.PyJWTError as e:
         raise Unauthorized("invalid_token", f"Invalid token: {e}") from e
+    # Better Auth copies the user into the token; the web refuses unverified sign-ins, and this keeps
+    # a token minted any other way (an older session, a bearer exchange) from acting for an unproven address.
+    if claims.get("emailVerified") is not True:
+        raise Forbidden("email_not_verified", "Verify your email address first")
     return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"), role=claims.get("role"))
 
 

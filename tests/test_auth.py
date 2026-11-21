@@ -21,6 +21,14 @@ def test_me_with_token(client):
     assert r.json()["id"] == "alice"
 
 
+def test_unverified_email_rejected(client):
+    for claims in ({"emailVerified": False}, {"emailVerified": None}, {"emailVerified": "true"}):
+        token = make_token("alice", **claims)
+        r = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "email_not_verified"
+
+
 def test_expired_token_rejected(client):
     token = make_token("alice", exp=int(time.time()) - 10)
     r = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
