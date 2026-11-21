@@ -1,12 +1,14 @@
 """Publishing a work: validate the files, fingerprint them, store them, embed the image."""
 
+import uuid
+
 from fastapi import UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.features.artists.models import Artist
-from app.features.works.models import Work
+from app.features.works.models import Exposition, Work
 from app.platform import storage
 from app.platform.auth import CurrentUser
 from app.platform.db import Db
@@ -26,12 +28,17 @@ async def publish_work(
     story: str,
     category: str,
     ai_declared: bool,
+    exposition_id: uuid.UUID | None,
     file: UploadFile,
     proof: list[UploadFile],
 ) -> Work:
     artist = await db.scalar(select(Artist).where(Artist.user_id == user.id))
     if artist is None:
         raise Forbidden("not_an_artist", "Create your artist profile first (PUT /me/artist)")
+    if exposition_id and not await db.scalar(
+        select(Exposition.id).where(Exposition.id == exposition_id, Exposition.artist_id == artist.id)
+    ):
+        raise BadRequest("invalid_exposition", "Choose one of your own expositions")
     if len(proof) > MAX_PROOFS:
         raise BadRequest("too_many_proofs", f"At most {MAX_PROOFS} proof files")
 
@@ -50,6 +57,7 @@ async def publish_work(
         title=title,
         story=story,
         category=category,
+        exposition_id=exposition_id,
         media_path=storage.save(data, ext),
         media_kind=kind,
         proof_paths=proof_paths,

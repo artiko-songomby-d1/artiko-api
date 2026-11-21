@@ -26,6 +26,7 @@ def to_out(work: Work, artist_name: str, votes: int) -> WorkOut:
         title=work.title,
         story=work.story,
         category=work.category,
+        exposition_id=work.exposition_id,
         media_url=storage.media_url(work.media_path),
         media_kind=work.media_kind,
         proof_urls=[storage.media_url(p) for p in work.proof_paths],
@@ -46,7 +47,11 @@ async def load_work(db: Db, work_id: uuid.UUID) -> WorkOut:
 
 
 async def search_works(
-    db: Db, category: str | None, month: str | None, artist_id: uuid.UUID | None
+    db: Db,
+    category: str | None,
+    month: str | None,
+    artist_id: uuid.UUID | None,
+    exposition_id: uuid.UUID | None = None,
 ) -> list[WorkOut]:
     q = works_query().order_by(Work.created_at.desc())
     if category:
@@ -55,4 +60,6 @@ async def search_works(
         q = q.where(Work.month == month)
     if artist_id:
         q = q.where(Work.artist_id == artist_id)
+    if exposition_id:
+        q = q.where(Work.exposition_id == exposition_id)
     return [to_out(*row) for row in await db.execute(q)]

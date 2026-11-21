@@ -3,7 +3,7 @@
     uv run python -m scripts.seed_demo
 
 Idempotent: practices are upserted, demo artists (user ids `demo-*`) are recreated with their
-works and votes. Artwork images are generated placeholders: replace them with real photos for
+expositions, works and votes. Artwork images are generated placeholders: replace them with real photos for
 the pitch by publishing through the app. Index figures are illustrative, not survey data.
 """
 
@@ -16,7 +16,7 @@ from sqlalchemy import delete, select
 
 from app.features.artists.models import Artist
 from app.features.practices.models import Practice
-from app.features.works.models import Vote, Work
+from app.features.works.models import Exposition, Vote, Work
 from app.platform import storage
 from app.platform.db import get_sessionmaker
 from app.platform.embed import embed
@@ -75,11 +75,17 @@ async def main() -> None:
             artist = Artist(user_id=user_id, display_name=name, bio=bio, region=region)
             db.add(artist)
             await db.flush()
+            expositions = [
+                Exposition(artist_id=artist.id, title=f"{name.split()[0]}: {title}", description=bio)
+                for title in ("first studies", "later studies")
+            ]
+            db.add_all(expositions)
+            await db.flush()
             for i in range(5):
                 data = placeholder(a * 100 + i, category)
                 proofs = [storage.save(placeholder(a * 100 + i + 50 + p, category), ".jpg") for p in range(2)]
-                work = Work(artist_id=artist.id, title=f"{name.split()[0]} study {i + 1}",
-                            story=f"Demo work {i + 1} by {name}.", category=category,
+                work = Work(artist_id=artist.id, exposition_id=expositions[i // 3].id,
+                            title=f"{name.split()[0]} study {i + 1}", story=f"Demo work {i + 1} by {name}.", category=category,
                             media_path=storage.save(data, ".jpg"), media_kind="image", proof_paths=proofs,
                             sha256=storage.sha256(data), ai_declared=False, human_proven=True, month=month,
                             embedding=embed(data).tolist())

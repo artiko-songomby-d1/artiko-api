@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.features.artists.router import router as artists
+from app.features.expositions.router import router as expositions
 from app.features.health.router import router as health
 from app.features.me.router import router as me
 from app.features.media.router import router as media
@@ -15,7 +16,7 @@ from app.platform.errors import install_error_handlers
 from app.platform.http_security import install_security_headers
 
 API_PREFIX = "/api/v1"
-ROUTERS = (health, me, artists, museum, works, votes, practices, scan)
+ROUTERS = (health, me, artists, expositions, museum, works, votes, practices, scan)
 
 
 def create_app() -> FastAPI:
