@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20
 
     models_dir: str = "models"
+    # Cosine similarity above which a scanned photo is the same work (CLIP ViT-B/32).
+    scan_match_threshold: float = 0.85
+    # Where the web app lives (links in scan sources).
+    public_web_url: str = "http://localhost:3000"
     # "clip" runs the ONNX model; "none" gives a deterministic stand-in vector (tests, no model).
     embed_provider: str = "clip"
 

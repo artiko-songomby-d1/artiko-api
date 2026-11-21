@@ -50,6 +50,9 @@ def _clean_db():
         with engine.begin() as conn:
             conn.execute(text(f"TRUNCATE {tables} CASCADE"))
         engine.dispose()
+    from app.core.index import index
+
+    index.reset()
     yield
 
 
