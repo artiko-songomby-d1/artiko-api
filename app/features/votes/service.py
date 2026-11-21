@@ -10,7 +10,7 @@ from app.features.votes.schemas import HallOfFameEntry
 from app.features.works.models import Vote, Work
 from app.features.works.queries import to_out, works_query
 from app.platform.db import Db
-from app.platform.errors import ApiError
+from app.platform.errors import BadRequest, Conflict, NotFound
 from app.platform.months import current_month
 
 HALL_OF_FAME_SIZE = 5
@@ -19,22 +19,22 @@ HALL_OF_FAME_SIZE = 5
 async def cast_vote(db: Db, user_id: str, work_id: uuid.UUID) -> Vote:
     work = await db.get(Work, work_id)
     if work is None:
-        raise ApiError(404, "work_not_found", "No work with this id")
+        raise NotFound("work_not_found", "No work with this id")
     if not work.human_proven:
-        raise ApiError(400, "not_eligible", "Only human-proven works enter the monthly vote")
+        raise BadRequest("not_eligible", "Only human-proven works enter the monthly vote")
     month = current_month()
     if work.month != month:
-        raise ApiError(400, "not_in_contest", "Only works published this month can receive votes")
+        raise BadRequest("not_in_contest", "Only works published this month can receive votes")
     owner = await db.scalar(select(Artist.user_id).where(Artist.id == work.artist_id))
     if owner == user_id:
-        raise ApiError(400, "own_work", "You cannot vote for your own work")
+        raise BadRequest("own_work", "You cannot vote for your own work")
 
     vote = Vote(user_id=user_id, work_id=work.id, category=work.category, month=month)
     db.add(vote)
     try:
         await db.commit()
     except IntegrityError as e:  # the unique constraint is the real guard against double votes
-        raise ApiError(409, "already_voted", "You already voted in this category this month") from e
+        raise Conflict("already_voted", "You already voted in this category this month") from e
     return vote
 
 

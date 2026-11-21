@@ -11,7 +11,7 @@ from app.platform import storage
 from app.platform.auth import CurrentUser
 from app.platform.db import Db
 from app.platform.embed import embed
-from app.platform.errors import ApiError
+from app.platform.errors import BadRequest, Conflict, Forbidden
 from app.platform.months import current_month
 
 MAX_PROOFS = 5
@@ -31,15 +31,15 @@ async def publish_work(
 ) -> Work:
     artist = await db.scalar(select(Artist).where(Artist.user_id == user.id))
     if artist is None:
-        raise ApiError(403, "not_an_artist", "Create your artist profile first (PUT /me/artist)")
+        raise Forbidden("not_an_artist", "Create your artist profile first (PUT /me/artist)")
     if len(proof) > MAX_PROOFS:
-        raise ApiError(400, "too_many_proofs", f"At most {MAX_PROOFS} proof files")
+        raise BadRequest("too_many_proofs", f"At most {MAX_PROOFS} proof files")
 
     data = await storage.read_upload(file)
     kind, ext = storage.kind_of(file, data)
     fingerprint = storage.sha256(data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
-        raise ApiError(409, "duplicate_work", "This exact file is already published on Artiko")
+        raise Conflict("duplicate_work", "This exact file is already published on Artiko")
     proof_paths = []
     for p in proof:
         p_data = await storage.read_upload(p)
@@ -63,5 +63,5 @@ async def publish_work(
     try:
         await db.commit()
     except IntegrityError as e:  # the same file published at the same instant
-        raise ApiError(409, "duplicate_work", "This exact file is already published on Artiko") from e
+        raise Conflict("duplicate_work", "This exact file is already published on Artiko") from e
     return work

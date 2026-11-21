@@ -9,7 +9,7 @@ from app.features.works.models import Vote, Work
 from app.features.works.schemas import WorkOut
 from app.platform import storage
 from app.platform.db import Db
-from app.platform.errors import ApiError
+from app.platform.errors import NotFound
 
 
 def works_query():
@@ -41,7 +41,7 @@ def to_out(work: Work, artist_name: str, votes: int) -> WorkOut:
 async def load_work(db: Db, work_id: uuid.UUID) -> WorkOut:
     row = (await db.execute(works_query().where(Work.id == work_id))).one_or_none()
     if row is None:
-        raise ApiError(404, "work_not_found", "No work with this id")
+        raise NotFound("work_not_found", "No work with this id")
     return to_out(*row)
 
 
