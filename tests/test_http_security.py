@@ -35,3 +35,14 @@ def test_unexpected_errors_return_a_generic_body_without_details(monkeypatch):
     assert r.json() == {"error": {"code": "internal_error", "message": "Something went wrong on our side"}}
     assert "secret" not in r.text
 
+
+def test_cors_allows_only_the_methods_and_headers_the_api_uses(client):
+    r = client.options(
+        "/api/v1/works",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Headers": "X-Evil",
+        },
+    )
+    assert r.status_code == 400
