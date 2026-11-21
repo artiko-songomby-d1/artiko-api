@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     attestation_extra_roots_pem: str = ""
     # "none" accepts every integrity token except the literal "fail"; no other provider is implemented yet.
     integrity_provider: str = "none"
+    # Transition switch: while the Android app cannot capture signed proof yet, true lets imported proof files
+    # count for the badge again, as before. Leave it false once the app ships in-app capture.
+    allow_imported_proofs_for_badge: bool = False
     # A signed capture must reach the server within this many minutes of being taken.
     capture_max_age_minutes: int = 10
     # Device registration and nonce requests per client per minute.

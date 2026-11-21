@@ -14,6 +14,7 @@ from app.features.works.models import Exposition, Work, WorkProof
 from app.features.works.proofs import PUBLIC, REVIEWERS
 from app.platform import storage
 from app.platform.auth import CurrentUser
+from app.platform.config import get_settings
 from app.platform.db import Db
 from app.platform.embed import embed
 from app.platform.errors import BadRequest, Conflict, Forbidden
@@ -96,7 +97,7 @@ async def publish_work(
         proofs=proofs,
         sha256=fingerprint,
         ai_declared=ai_declared,
-        human_proven=sum(p.signed for p in proofs) >= MIN_PROOFS_FOR_HUMAN and not ai_declared,
+        human_proven=sum(_counts_for_badge(p) for p in proofs) >= MIN_PROOFS_FOR_HUMAN and not ai_declared,
         month=current_month(),
         embedding=embedding,
         phash=image_hash,
@@ -118,3 +119,7 @@ async def _join_series(db: Db, earlier_id: uuid.UUID | None) -> uuid.UUID | None
     if earlier.series_id is None:
         earlier.series_id = earlier.id
     return earlier.series_id
+
+
+def _counts_for_badge(proof: WorkProof) -> bool:
+    return proof.signed or (get_settings().allow_imported_proofs_for_badge and proof.source == "imported")

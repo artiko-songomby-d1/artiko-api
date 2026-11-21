@@ -154,3 +154,9 @@ def test_claims_must_be_valid_json(client):
         headers=auth("alice"),
     )
     assert error(r) == "invalid_proof_claims"
+
+
+def test_the_transition_switch_lets_imported_proof_count_again(client, monkeypatch):
+    become_artist(client, "alice")
+    monkeypatch.setattr(get_settings(), "allow_imported_proofs_for_badge", True)
+    assert publish(client, "alice", 3, signed=False).json()["human_proven"] is True
