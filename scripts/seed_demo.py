@@ -18,7 +18,7 @@ from app.features.artists.models import Artist
 from app.features.practices.models import Practice
 from app.features.works.models import Vote, Work
 from app.platform import storage
-from app.platform.db import SessionLocal
+from app.platform.db import get_sessionmaker
 from app.platform.embed import embed
 from app.platform.months import current_month
 
@@ -61,7 +61,7 @@ def placeholder(seed: int, palette: str) -> bytes:
 
 
 async def main() -> None:
-    async with SessionLocal() as db:
+    async with get_sessionmaker()() as db:
         for pid, name, region, category, practitioners, learners, age, description in PRACTICES:
             await db.merge(Practice(id=pid, name=name, region=region, category=category, practitioners=practitioners,
                                     learners=learners, median_age=age, description=description))

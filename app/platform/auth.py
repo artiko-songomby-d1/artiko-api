@@ -3,6 +3,7 @@
 import asyncio
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Annotated, Any
 
 import httpx
@@ -54,7 +55,9 @@ class Jwks:
         return self.keys[kid]
 
 
-jwks = Jwks(get_settings().auth_jwks_url)
+@lru_cache
+def get_jwks() -> Jwks:
+    return Jwks(get_settings().auth_jwks_url)
 
 
 @dataclass(frozen=True)
@@ -69,7 +72,7 @@ async def decode_token(token: str) -> CurrentUser:
     try:
         claims = jwt.decode(
             token,
-            await jwks.key_for(token),
+            await get_jwks().key_for(token),
             algorithms=["EdDSA", "ES256", "RS256"],
             issuer=s.auth_issuer,
             audience=s.auth_audience,

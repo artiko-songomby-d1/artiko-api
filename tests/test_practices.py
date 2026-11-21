@@ -2,7 +2,7 @@ import asyncio
 
 from app.features.practices.models import Practice
 from app.features.practices.status import status
-from app.platform.db import SessionLocal
+from app.platform.db import get_sessionmaker
 
 
 def test_status_rule():
@@ -14,7 +14,7 @@ def test_status_rule():
 
 def test_list_most_endangered_first(client):
     async def seed():
-        async with SessionLocal() as db:
+        async with get_sessionmaker()() as db:
             db.add_all([
                 Practice(id="antemoro-paper", name="Antemoro paper", region="Madagascar", category="crafts",
                          practitioners=60, learners=70, median_age=40, description=""),

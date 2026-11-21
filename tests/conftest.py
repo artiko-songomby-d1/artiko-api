@@ -39,8 +39,8 @@ _key = Ed25519PrivateKey.generate()
 def _migrate():
     subprocess.run(["alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parents[1])
     # The test key stands in for Better Auth's JWKS; no network call is ever made.
-    security.jwks.keys = {"test": _key.public_key()}
-    security.jwks.fetched = time.monotonic() + 10**9
+    security.get_jwks().keys = {"test": _key.public_key()}
+    security.get_jwks().fetched = time.monotonic() + 10**9
 
 
 @pytest.fixture(autouse=True)
@@ -51,9 +51,9 @@ def _clean_db():
         with engine.begin() as conn:
             conn.execute(text(f"TRUNCATE {tables} CASCADE"))
         engine.dispose()
-    from app.features.scan.index import index
+    from app.features.scan.index import get_index
 
-    index.reset()
+    get_index().reset()
     yield
 
 

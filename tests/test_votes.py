@@ -40,13 +40,13 @@ def test_vote_on_last_month_work_refused(client):
 
     from sqlalchemy import update
 
-    from app.platform.db import SessionLocal
+    from app.platform.db import get_sessionmaker
 
     become_artist(client, "alice")
     work = publish(client, "alice", 1).json()
 
     async def age():
-        async with SessionLocal() as db:
+        async with get_sessionmaker()() as db:
             await db.execute(update(Work).where(Work.id == work["id"]).values(month="2000-01"))
             await db.commit()
 

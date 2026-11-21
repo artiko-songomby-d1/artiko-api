@@ -9,6 +9,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 
 import numpy as np
 from sqlalchemy import func, select
@@ -74,4 +75,6 @@ class Index:
         return ("work", w_id, w_score) if w_score >= k_score else ("known", k_id, k_score)
 
 
-index = Index()
+@lru_cache
+def get_index() -> Index:
+    return Index()
