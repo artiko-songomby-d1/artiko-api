@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     scan_match_threshold: float = 0.85
     # Where the web app lives (links in scan sources).
     public_web_url: str = "http://localhost:3000"
+    # Publishing is refused when the image is this similar (CLIP cosine) to another artist's work or a known work.
+    publish_duplicate_threshold: float = 0.92
+    # ...or when its perceptual hash differs by at most this many of 64 bits (crops, resizes, recompression).
+    publish_phash_max_distance: int = 8
     # "clip" runs the ONNX model; "none" gives a deterministic stand-in vector (tests, no model).
     embed_provider: str = "clip"
 

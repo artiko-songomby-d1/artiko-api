@@ -37,6 +37,7 @@ def to_out(
         story=work.story,
         category=work.category,
         exposition_id=work.exposition_id,
+        series_id=work.series_id,
         media_url=storage.media_url(work.media_path),
         media_kind=work.media_kind,
         proof_urls=visible_proof_urls(work, owner_user_id, viewer),

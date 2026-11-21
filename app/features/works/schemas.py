@@ -26,6 +26,7 @@ class WorkOut(BaseModel):
     story: str
     category: CategoryId
     exposition_id: uuid.UUID | None
+    series_id: uuid.UUID | None
     media_url: str
     media_kind: Literal["image", "audio", "video", "model"]
     proof_urls: list[str]

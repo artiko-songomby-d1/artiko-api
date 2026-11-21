@@ -160,7 +160,10 @@ paths:
       summary: Publish a work with its proof of process (artists only)
       description: |
         The work is `human_proven` when it has at least 2 proof files and is not declared
-        AI-assisted. The same file (SHA-256) cannot be published twice.
+        AI-assisted. The same file (SHA-256) cannot be published twice. An image that looks like another
+        artist's work or a known work (CLIP similarity or perceptual hash) is refused with 409 `possible_copy`
+        and the id of the review case; one that looks like the artist's own earlier work is accepted and the two
+        works share a `series_id`.
         Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
         video (mp4, webm), 3D (glb).
       security: [{ bearer: [] }]
@@ -499,6 +502,7 @@ components:
           properties:
             code: { type: string, examples: [already_voted] }
             message: { type: string }
+            case_id: { type: string, format: uuid, description: "Review case opened for a refused publication (`possible_copy`)" }
 
     Month:
       type: string
@@ -583,6 +587,7 @@ components:
         story: { type: string }
         category: { $ref: "#/components/schemas/CategoryId" }
         exposition_id: { type: [string, "null"], format: uuid, description: Always present; null when the work is in no exposition }
+        series_id: { type: [string, "null"], format: uuid, description: Shared by an artist's works that are near-copies of each other }
         media_url: { type: string, format: uri }
         media_kind: { $ref: "#/components/schemas/MediaKind" }
         proof_urls:

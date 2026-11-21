@@ -45,18 +45,20 @@ class Index:
 
     def reset(self) -> None:
         self.works, self.known = _Matrix(), _Matrix()
+        self.owners: dict[uuid.UUID, uuid.UUID] = {}
         self.works_since: datetime | None = None
         self.known_count = -1
 
     async def refresh(self, db: AsyncSession) -> None:
         """Append works published since the last scan; reload known works if their count changed."""
         async with self._lock:
-            q = select(Work.id, Work.embedding, Work.created_at).where(Work.embedding.is_not(None))
+            q = select(Work.id, Work.embedding, Work.created_at, Work.artist_id).where(Work.embedding.is_not(None))
             if self.works_since:  # >= because two works can share a timestamp
                 q = q.where(Work.created_at >= self.works_since)
             rows = (await db.execute(q.order_by(Work.created_at))).all()
             seen = set(self.works.ids)
             self.works.extend([(r[0], r[1]) for r in rows if r[0] not in seen])
+            self.owners.update({r[0]: r[3] for r in rows})
             if rows:
                 self.works_since = rows[-1][2]
 
@@ -73,6 +75,16 @@ class Index:
         if w_id is None and k_id is None:
             return None, None, 0.0
         return ("work", w_id, w_score) if w_score >= k_score else ("known", k_id, k_score)
+
+
+    def top(self, vec: np.ndarray, count: int = 5) -> list[tuple[str, uuid.UUID, float]]:
+        """The `count` closest images as ("work" | "known", id, cosine similarity), closest first."""
+        found = []
+        for kind, matrix in (("work", self.works), ("known", self.known)):
+            if matrix.ids:
+                scores = matrix.vectors @ vec
+                found += [(kind, matrix.ids[i], float(scores[i])) for i in np.argsort(scores)[::-1][:count]]
+        return sorted(found, key=lambda hit: -hit[2])[:count]
 
 
 @lru_cache
