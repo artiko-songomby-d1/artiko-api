@@ -85,7 +85,8 @@ async def main() -> None:
                 data = placeholder(a * 100 + i, category)
                 proofs = [storage.save(placeholder(a * 100 + i + 50 + p, category), ".jpg") for p in range(2)]
                 work = Work(artist_id=artist.id, exposition_id=expositions[i // 3].id,
-                            title=f"{name.split()[0]} study {i + 1}", story=f"Demo work {i + 1} by {name}.", category=category,
+                            title=f"{name.split()[0]} study {i + 1}", story=f"Demo work {i + 1} by {name}.",
+                            category=category,
                             media_path=storage.save(data, ".jpg"), media_kind="image", proof_paths=proofs,
                             sha256=storage.sha256(data), ai_declared=False, human_proven=True, month=month,
                             embedding=embed(data).tolist())
