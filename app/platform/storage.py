@@ -8,7 +8,7 @@ from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
 
 from app.platform.config import get_settings
-from app.platform.errors import ApiError
+from app.platform.errors import BadRequest, PayloadTooLarge
 
 # The browser's content type is only a hint: images are decoded and GLB files checked by magic.
 TYPES = {
@@ -29,9 +29,9 @@ async def read_upload(file: UploadFile) -> bytes:
     limit = get_settings().max_upload_mb * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
-        raise ApiError(413, "file_too_large", f"{file.filename} is over {get_settings().max_upload_mb} MB")
+        raise PayloadTooLarge("file_too_large", f"{file.filename} is over {get_settings().max_upload_mb} MB")
     if not data:
-        raise ApiError(400, "empty_file", f"{file.filename} is empty")
+        raise BadRequest("empty_file", f"{file.filename} is empty")
     return data
 
 
@@ -50,7 +50,7 @@ def kind_of(file: UploadFile, data: bytes) -> tuple[str, str]:
         (kind != "image" or is_image(data)) and (kind != "model" or data[:4] == b"glTF")
     )
     if not ok:
-        raise ApiError(400, "unsupported_file", f"{file.filename}: type {file.content_type} is not accepted")
+        raise BadRequest("unsupported_file", f"{file.filename}: type {file.content_type} is not accepted")
     return kind, ext
 
 

@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy import select
 
 from app.features.scan.models import KnownWork
-from app.platform.db import SessionLocal
+from app.platform.db import get_sessionmaker
 from app.platform.embed import embed
 
 COMMONS = "https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=800"
@@ -55,7 +55,7 @@ async def met(client: httpx.AsyncClient, limit: int):
 
 
 async def main(met_limit: int) -> None:
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client, SessionLocal() as db:
+    async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client, get_sessionmaker()() as db:
         known = set(await db.scalars(select(KnownWork.source_url)))
         added = 0
         for source in (famous(), met(client, met_limit)):

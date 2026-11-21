@@ -3,6 +3,7 @@
 import asyncio
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Annotated, Any
 
 import httpx
@@ -11,7 +12,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.platform.config import get_settings
-from app.platform.errors import ApiError
+from app.platform.errors import Unauthorized
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -54,7 +55,9 @@ class Jwks:
         return self.keys[kid]
 
 
-jwks = Jwks(get_settings().auth_jwks_url)
+@lru_cache
+def get_jwks() -> Jwks:
+    return Jwks(get_settings().auth_jwks_url)
 
 
 @dataclass(frozen=True)
@@ -69,14 +72,14 @@ async def decode_token(token: str) -> CurrentUser:
     try:
         claims = jwt.decode(
             token,
-            await jwks.key_for(token),
+            await get_jwks().key_for(token),
             algorithms=["EdDSA", "ES256", "RS256"],
             issuer=s.auth_issuer,
             audience=s.auth_audience,
             options={"require": ["sub", "exp"]},
         )
     except jwt.PyJWTError as e:
-        raise ApiError(401, "invalid_token", f"Invalid token: {e}") from e
+        raise Unauthorized("invalid_token", f"Invalid token: {e}") from e
     return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"))
 
 
@@ -84,7 +87,7 @@ async def current_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> CurrentUser:
     if creds is None:
-        raise ApiError(401, "unauthorized", "Sign in first")
+        raise Unauthorized("unauthorized", "Sign in first")
     return await decode_token(creds.credentials)
 
 

@@ -36,3 +36,27 @@ def test_features_never_import_another_features_router():
             if len(parts) >= 4 and parts[1] == "features" and parts[2] != own and parts[3] == "router":
                 offenders.append(f"{path.relative_to(APP)} imports {name}")
     assert not offenders, offenders
+
+
+# Feature -> features it may import. Anything else is a new dependency to discuss, not to slip in.
+ALLOWED = {
+    "artists": set(),
+    "practices": {"works"},
+    "works": {"artists"},
+    "votes": {"works", "artists"},
+    "museum": {"works", "artists"},
+    "scan": {"works"},
+    "me": {"artists"},
+    "health": set(),
+}
+
+
+def test_feature_dependencies_follow_the_declared_direction():
+    offenders = []
+    for path in (APP / "features").rglob("*.py"):
+        own = path.relative_to(APP / "features").parts[0]
+        for name in imports_of(path):
+            parts = name.split(".")
+            if len(parts) >= 3 and parts[1] == "features" and parts[2] != own and parts[2] not in ALLOWED[own]:
+                offenders.append(f"{path.relative_to(APP)} imports {name}")
+    assert not offenders, offenders

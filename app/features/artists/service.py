@@ -5,13 +5,13 @@ from sqlalchemy import select
 from app.features.artists.models import Artist
 from app.features.artists.schemas import ArtistIn
 from app.platform.db import Db
-from app.platform.errors import ApiError
+from app.platform.errors import NotFound
 
 
 async def get_artist(db: Db, artist_id: uuid.UUID) -> Artist:
     artist = await db.get(Artist, artist_id)
     if artist is None:
-        raise ApiError(404, "artist_not_found", "No artist with this id")
+        raise NotFound("artist_not_found", "No artist with this id")
     return artist
 
 

@@ -3,7 +3,7 @@
 from fastapi.concurrency import run_in_threadpool
 
 from app.features.scan.c2pa import ai_generator
-from app.features.scan.index import index
+from app.features.scan.index import get_index
 from app.features.scan.models import KnownWork
 from app.features.scan.schemas import KnownWorkOut, ScanResult, Source
 from app.features.works.queries import load_work
@@ -23,6 +23,7 @@ async def identify(db: Db, data: bytes, mime: str) -> ScanResult:
         )
 
     vec = await run_in_threadpool(embed, data)
+    index = get_index()
     await index.refresh(db)
     kind, match_id, score = index.search(vec)
     if kind is None or score < get_settings().scan_match_threshold:

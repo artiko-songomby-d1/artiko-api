@@ -1,13 +1,43 @@
+"""Errors raised by services and mapped to HTTP in one place.
+
+Callers name what went wrong (`NotFound`, `Conflict`...) and never pass status numbers around.
+Every error leaves the API as {"error": {"code", "message"}}.
+"""
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
 class ApiError(Exception):
-    """Every error leaves the API as {"error": {"code", "message"}}."""
+    status = 500
 
-    def __init__(self, status: int, code: str, message: str):
-        self.status, self.code, self.message = status, code, message
+    def __init__(self, code: str, message: str):
+        self.code, self.message = code, message
+
+
+class BadRequest(ApiError):
+    status = 400
+
+
+class Unauthorized(ApiError):
+    status = 401
+
+
+class Forbidden(ApiError):
+    status = 403
+
+
+class NotFound(ApiError):
+    status = 404
+
+
+class Conflict(ApiError):
+    status = 409
+
+
+class PayloadTooLarge(ApiError):
+    status = 413
 
 
 def _body(code: str, message: str) -> dict:
