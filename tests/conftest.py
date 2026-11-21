@@ -38,7 +38,7 @@ _key = Ed25519PrivateKey.generate()
 @pytest.fixture(scope="session", autouse=True)
 def _migrate():
     subprocess.run(["alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parents[1])
-    # The test key stands in for Better Auth's JWKS; no network call is ever made.
+    # The test key stands in for Keycloak's JWKS; no network call is ever made.
     security.get_jwks().keys = {"test": _key.public_key()}
     security.get_jwks().fetched = time.monotonic() + 10**9
 
