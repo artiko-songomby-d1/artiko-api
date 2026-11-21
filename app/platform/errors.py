@@ -4,9 +4,13 @@ Callers name what went wrong (`NotFound`, `Conflict`...) and never pass status n
 Every error leaves the API as {"error": {"code", "message"}}.
 """
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+log = logging.getLogger("artiko.errors")
 
 
 class ApiError(Exception):
@@ -54,3 +58,9 @@ def install_error_handlers(app: FastAPI) -> None:
         first = e.errors()[0] if e.errors() else {}
         where = ".".join(str(p) for p in first.get("loc", []))
         return JSONResponse(_body("invalid_request", f"{where}: {first.get('msg', 'invalid')}"), 422)
+
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, e: Exception):
+        # The detail goes to the logs only: a stack trace or SQL error must never reach a client.
+        log.exception("unhandled error on %s %s", request.method, request.url.path, exc_info=e)
+        return JSONResponse(_body("internal_error", "Something went wrong on our side"), status_code=500)

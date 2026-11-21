@@ -12,6 +12,7 @@ from app.features.votes.router import router as votes
 from app.features.works.router import router as works
 from app.platform.config import get_settings
 from app.platform.errors import install_error_handlers
+from app.platform.http_security import install_security_headers
 
 API_PREFIX = "/api/v1"
 ROUTERS = (health, me, artists, museum, works, votes, practices, scan)
@@ -24,10 +25,11 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
     install_error_handlers(app)
+    install_security_headers(app)
     for router in ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
     # Files keep the URLs the apps already have (/media/<sha256>.<ext>), whatever the storage.

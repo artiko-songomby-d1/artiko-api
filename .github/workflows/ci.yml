@@ -27,6 +27,10 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run pytest -q
+      # Known-vulnerability scan of the locked, non-dev dependencies.
+      - run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements-audit.txt
+          uvx pip-audit -r requirements-audit.txt --no-deps --disable-pip
   docker:
     # The image Render runs: dependencies, code and the CLIP model must all build.
     runs-on: ubuntu-latest

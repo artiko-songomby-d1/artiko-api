@@ -69,3 +69,20 @@ def test_categories(client):
 
 def test_png_helper_distinct():
     assert png(1) != png(2)
+
+
+def test_a_file_that_lies_about_its_type_is_rejected(client):
+    become_artist(client, "alice")
+    html = b"<html><script>alert(1)</script></html>"
+    for mime in ("audio/mpeg", "audio/wav", "audio/ogg", "video/mp4", "video/webm", "model/gltf-binary"):
+        files = [("file", ("x.bin", html, mime))]
+        r = client.post("/api/v1/works", data={"title": "T", "category": "music"}, files=files, headers=auth("alice"))
+        assert r.status_code == 400 and r.json()["error"]["code"] == "unsupported_file", mime
+
+
+def test_a_real_wav_is_accepted(client):
+    become_artist(client, "alice")
+    wav = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 20
+    files = [("file", ("a.wav", wav, "audio/wav"))]
+    r = client.post("/api/v1/works", data={"title": "T", "category": "music"}, files=files, headers=auth("alice"))
+    assert r.status_code == 201 and r.json()["media_kind"] == "audio"

@@ -3,17 +3,17 @@
 Resumes from the partial file after a dropped connection (HTTP Range), retrying until done.
 """
 
+import os
 import time
 from pathlib import Path
 
 import httpx
 
-from app.platform.config import get_settings
-
 URL = "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx"
 ATTEMPTS = 20
 
-target = Path(get_settings().models_dir) / "clip-vision.onnx"
+# Read from the environment, not Settings: the Docker build runs this with no database configured.
+target = Path(os.environ.get("MODELS_DIR", "models")) / "clip-vision.onnx"
 target.parent.mkdir(parents=True, exist_ok=True)
 tmp = target.with_suffix(".part")
 

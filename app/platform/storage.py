@@ -4,6 +4,7 @@ import hashlib
 import io
 import mimetypes
 import re
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -46,12 +47,26 @@ def is_image(data: bytes) -> bool:
         return False
 
 
+def _is_mp3(data: bytes) -> bool:
+    return data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0)
+
+
+# Magic bytes per stored extension: the declared content type is only a hint, so every
+# non-image upload must start like the format it claims (an HTML page cannot pass as audio).
+SIGNATURES: dict[str, Callable[[bytes], bool]] = {
+    ".mp3": _is_mp3,
+    ".wav": lambda d: d[:4] == b"RIFF" and d[8:12] == b"WAVE",
+    ".ogg": lambda d: d[:4] == b"OggS",
+    ".mp4": lambda d: d[4:8] == b"ftyp",
+    ".webm": lambda d: d[:4] == b"\x1a\x45\xdf\xa3",
+    ".glb": lambda d: d[:4] == b"glTF",
+}
+
+
 def kind_of(file: UploadFile, data: bytes) -> tuple[str, str]:
     """(media kind, file extension), or 400 when the type is not accepted or the bytes lie."""
     kind, ext = TYPES.get(file.content_type or "", (None, None))
-    ok = kind is not None and (
-        (kind != "image" or is_image(data)) and (kind != "model" or data[:4] == b"glTF")
-    )
+    ok = kind is not None and (is_image(data) if kind == "image" else SIGNATURES[ext](data))
     if not ok:
         raise BadRequest("unsupported_file", f"{file.filename}: type {file.content_type} is not accepted")
     return kind, ext

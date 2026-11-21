@@ -55,7 +55,10 @@ async def met(client: httpx.AsyncClient, limit: int):
 
 
 async def main(met_limit: int) -> None:
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client, get_sessionmaker()() as db:
+    async with (
+        httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client,
+        get_sessionmaker()() as db,
+    ):
         known = set(await db.scalars(select(KnownWork.source_url)))
         added = 0
         for source in (famous(), met(client, met_limit)):
