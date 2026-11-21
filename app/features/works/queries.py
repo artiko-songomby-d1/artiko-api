@@ -5,8 +5,7 @@ import uuid
 from sqlalchemy import func, select
 
 from app.features.artists.models import Artist
-from app.features.votes.models import Vote
-from app.features.works.models import Work
+from app.features.works.models import Vote, Work
 from app.features.works.schemas import WorkOut
 from app.platform import storage
 from app.platform.db import Db

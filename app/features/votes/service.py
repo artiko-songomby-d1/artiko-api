@@ -6,9 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.features.artists.models import Artist
-from app.features.votes.models import Vote
 from app.features.votes.schemas import HallOfFameEntry
-from app.features.works.models import Work
+from app.features.works.models import Vote, Work
 from app.features.works.queries import to_out, works_query
 from app.platform.db import Db
 from app.platform.errors import ApiError

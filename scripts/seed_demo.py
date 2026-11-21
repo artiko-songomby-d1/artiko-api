@@ -16,8 +16,7 @@ from sqlalchemy import delete, select
 
 from app.features.artists.models import Artist
 from app.features.practices.models import Practice
-from app.features.votes.models import Vote
-from app.features.works.models import Work
+from app.features.works.models import Vote, Work
 from app.platform import storage
 from app.platform.db import SessionLocal
 from app.platform.embed import embed
