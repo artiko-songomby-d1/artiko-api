@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Public base URL of this API, used to build absolute media links for the apps.
     public_api_url: str = "http://localhost:8000"
     max_upload_mb: int = 20
+    # Secret that signs the short-lived links to reviewer-only proof files. Empty = no private link is issued.
+    proof_url_secret: str = ""
+    proof_url_ttl_seconds: int = 300
+    # GET /proofs/{id}/file is public (the signature is the credential): rate limit it like the scan.
+    proof_rate_limit_per_minute: int = 60
+    proof_global_rate_limit_per_minute: int = 600
     # POST /scan/image is public and runs the CLIP model: smaller photos and a per-client rate cap.
     scan_max_upload_mb: int = 5
     scan_rate_limit_per_minute: int = 20

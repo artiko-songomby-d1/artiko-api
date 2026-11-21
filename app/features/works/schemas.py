@@ -12,6 +12,12 @@ class Category(BaseModel):
     label: str
 
 
+class ProofOut(BaseModel):
+    id: uuid.UUID
+    visibility: Literal["public", "reviewers"]
+    url: str
+
+
 class WorkOut(BaseModel):
     id: uuid.UUID
     artist_id: uuid.UUID

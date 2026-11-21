@@ -102,32 +102,38 @@ def content_type(name: str) -> str:
     return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
-def save(data: bytes, ext: str) -> str:
-    """Store the bytes under their fingerprint; returns the stored name (served at /media/<name>)."""
+# Private files live under this prefix: /media only ever looks up bare names, so it never reaches them.
+PRIVATE_PREFIX = "private/"
+
+
+def save(data: bytes, ext: str, private: bool = False) -> str:
+    """Store the bytes under their fingerprint; returns the stored name (public ones are served at /media/<name>)."""
     name = f"{sha256(data)}{ext}"
+    key = f"{PRIVATE_PREFIX}{name}" if private else name
     bucket = get_settings().media_bucket
     if bucket:
-        bucket_client().put_object(Bucket=bucket, Key=name, Body=data, ContentType=content_type(name))
+        bucket_client().put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type(name))
         return name
-    path = Path(get_settings().media_dir) / name
+    path = Path(get_settings().media_dir) / key
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     return name
 
 
-def load(name: str) -> bytes | None:
+def load(name: str, private: bool = False) -> bytes | None:
     """The stored bytes, or None when the name is not a stored file."""
     if not NAME.match(name):
         return None
+    key = f"{PRIVATE_PREFIX}{name}" if private else name
     bucket = get_settings().media_bucket
     if bucket:
         client = bucket_client()
         try:
-            return client.get_object(Bucket=bucket, Key=name)["Body"].read()
+            return client.get_object(Bucket=bucket, Key=key)["Body"].read()
         except client.exceptions.NoSuchKey:
             return None
-    path = Path(get_settings().media_dir) / name
+    path = Path(get_settings().media_dir) / key
     return path.read_bytes() if path.is_file() else None
 
 
