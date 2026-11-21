@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
-from app.modules import health, me
+from app.modules import artists, health, me
 
 settings = get_settings()
 
@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 install_error_handlers(app)
-for module in (health, me):
+for module in (health, me, artists):
     app.include_router(module.router, prefix="/api/v1")
 
 Path(settings.media_dir).mkdir(parents=True, exist_ok=True)
