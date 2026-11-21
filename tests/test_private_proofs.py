@@ -85,10 +85,11 @@ def test_a_tampered_or_expired_link_is_refused(client):
 
 def test_public_proofs_are_shown_to_everyone_and_served_at_media(client):
     become_artist(client, "alice")
-    work = publish(client, "alice", 1, proof_visibility="public").json()
+    # Another seed than the private tests: files persist in MEDIA_DIR, and equal bytes share one name.
+    work = publish(client, "alice", 9, proof_visibility="public").json()
     urls = client.get(f"/api/v1/works/{work['id']}").json()["proof_urls"]
     assert len(urls) == 2 and all("/media/" in u for u in urls)
-    assert client.get(f"/media/{proof_name(1, 0)}").status_code == 200
+    assert client.get(f"/media/{proof_name(9, 0)}").status_code == 200
 
 
 def test_the_visibility_must_be_a_known_one(client):

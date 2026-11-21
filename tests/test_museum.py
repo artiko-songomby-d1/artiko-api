@@ -11,8 +11,9 @@ from tests.conftest import become_artist, publish
 def fake(kind: str) -> WorkOut:
     return WorkOut(
         id=uuid.uuid4(), artist_id=uuid.uuid4(), artist_name="A", title="T", story="", category="painting",
-        exposition_id=None, media_url="http://x/m", media_kind=kind, proof_urls=[], sha256="0" * 64, human_proven=True,
-        ai_declared=False, month="2026-11", created_at=datetime.now(UTC), votes=0,
+        exposition_id=None, series_id=None, media_url="http://x/m", media_kind=kind, proof_urls=[],
+        sha256="0" * 64, human_proven=True, ai_declared=False, month="2026-11",
+        created_at=datetime.now(UTC), votes=0,
     )
 
 

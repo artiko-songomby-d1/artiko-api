@@ -46,6 +46,10 @@ class Work(Base):
     exposition_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("exposition.id", ondelete="SET NULL"), index=True, nullable=True
     )
+    # 64-bit perceptual hash as 16 hex digits; null for audio, video and 3D.
+    phash: Mapped[str | None] = mapped_column(String(16), index=True, nullable=True)
+    # Works of one artist that are near-copies of each other (a series) share this id.
+    series_id: Mapped[uuid.UUID | None] = mapped_column(index=True, nullable=True)
     # CLIP image embedding (512 floats, normalized); null for audio and video.
     embedding: Mapped[list[float] | None] = mapped_column(ARRAY(REAL), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
