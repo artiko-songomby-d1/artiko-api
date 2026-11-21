@@ -29,21 +29,31 @@ class SlidingWindowLimiter:
     def __init__(self) -> None:
         self.hits: OrderedDict[str, deque[float]] = OrderedDict()
 
-    def check(self, client: str, limit: int, now: float | None = None) -> int | None:
-        """None when the request is allowed, else the seconds to wait before the next one."""
-        now = time.monotonic() if now is None else now
-        window = self.hits.pop(client, None)
+    def wait_for(self, client: str, limit: int, now: float) -> int | None:
+        """None when `client` is under `limit`, else the seconds to wait. Records nothing."""
+        window = self.hits.get(client)
         if window is None:
-            window = deque()
-        self.hits[client] = window  # most recently seen goes last
-        while len(self.hits) > MAX_TRACKED_CLIENTS:
-            self.hits.popitem(last=False)
+            return None
         while window and window[0] <= now - WINDOW_SECONDS:
             window.popleft()
         if len(window) >= limit:
             return max(1, int(window[0] + WINDOW_SECONDS - now) + 1)
-        window.append(now)
         return None
+
+    def record(self, client: str, now: float) -> None:
+        window = self.hits.pop(client, None) or deque()
+        self.hits[client] = window  # most recently seen goes last
+        window.append(now)
+        while len(self.hits) > MAX_TRACKED_CLIENTS:
+            self.hits.popitem(last=False)
+
+    def check(self, client: str, limit: int, now: float | None = None) -> int | None:
+        """None when the request is allowed and now counted, else the seconds to wait."""
+        now = time.monotonic() if now is None else now
+        wait = self.wait_for(client, limit, now)
+        if wait is None:
+            self.record(client, now)
+        return wait
 
     def reset(self) -> None:
         self.hits.clear()
@@ -75,10 +85,13 @@ def limit_per_minute(
 
     # async on purpose: it runs on the event loop with no await, so the limiter is never touched by two threads.
     async def check(request: Request) -> None:
-        wait = limiter.check(GLOBAL_KEY, overall())
-        if wait is None:
-            wait = limiter.check(client_key(request), per_client())
+        client, now = client_key(request), time.monotonic()
+        # Count a request in both buckets only when both allow it: a client stuck at its own limit must
+        # not use up the global budget and lock everyone else out.
+        wait = limiter.wait_for(client, per_client(), now) or limiter.wait_for(GLOBAL_KEY, overall(), now)
         if wait is not None:
             raise TooManyRequests("rate_limited", "Too many requests, try again shortly", retry_after=wait)
+        limiter.record(client, now)
+        limiter.record(GLOBAL_KEY, now)
 
     return Depends(check)

@@ -78,3 +78,21 @@ def test_scan_has_a_global_cap_that_changing_address_cannot_get_around(client, m
         ).status_code
 
     assert [scan_from(f"198.51.100.{i}") for i in range(3)] == [200, 200, 429]
+
+
+def test_a_client_over_its_own_limit_does_not_use_up_the_global_budget(client, monkeypatch):
+    from app.platform.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "scan_rate_limit_per_minute", 1)
+    monkeypatch.setattr(get_settings(), "scan_global_rate_limit_per_minute", 3)
+    monkeypatch.setattr(get_settings(), "client_ip_header", "x-real-ip")
+
+    def scan_from(address: str):
+        return client.post(
+            "/api/v1/scan/image",
+            files={"file": ("photo.png", png(1), "image/png")},
+            headers={"X-Real-IP": address},
+        ).status_code
+
+    assert [scan_from("198.51.100.1") for _ in range(5)] == [200, 429, 429, 429, 429]
+    assert [scan_from("198.51.100.2"), scan_from("198.51.100.3")] == [200, 200]
