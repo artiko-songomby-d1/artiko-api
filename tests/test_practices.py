@@ -1,7 +1,7 @@
 import asyncio
 
 from app.features.practices.models import Practice
-from app.modules.practices import status
+from app.features.practices.status import status
 from app.platform.db import SessionLocal
 
 
