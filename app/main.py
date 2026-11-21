@@ -9,9 +9,9 @@ from app.features.health import router as health
 from app.features.me import router as me
 from app.features.museum import router as museum
 from app.features.practices import router as practices
+from app.features.scan import router as scan
 from app.features.votes import router as votes
 from app.features.works import router as works
-from app.modules import scan
 from app.platform.config import get_settings
 from app.platform.errors import install_error_handlers
 
