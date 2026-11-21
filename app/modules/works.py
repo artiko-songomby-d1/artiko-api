@@ -8,12 +8,12 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.core import storage
-from app.core.db import Db
 from app.core.embed import embed
-from app.core.errors import ApiError
-from app.core.security import User
 from app.models import Artist, Vote, Work
+from app.platform import storage
+from app.platform.auth import User
+from app.platform.db import Db
+from app.platform.errors import ApiError
 
 router = APIRouter(tags=["works"])
 

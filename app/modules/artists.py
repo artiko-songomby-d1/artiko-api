@@ -6,10 +6,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
-from app.core.db import Db
-from app.core.errors import ApiError
 from app.models import Artist, Work
 from app.modules.works import WorkOut, to_out, works_query
+from app.platform.db import Db
+from app.platform.errors import ApiError
 
 router = APIRouter(prefix="/artists", tags=["artists"])
 

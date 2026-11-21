@@ -4,10 +4,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
-from app.core.db import Db
-from app.core.errors import ApiError
 from app.models import Practice
 from app.modules.works import CategoryId
+from app.platform.db import Db
+from app.platform.errors import ApiError
 
 router = APIRouter(prefix="/practices", tags=["practices"])
 Status = Literal["red", "orange", "green"]

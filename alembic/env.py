@@ -4,8 +4,8 @@ from sqlalchemy import create_engine, text
 
 from alembic import context
 from app import models  # noqa: F401  registers every table on Base.metadata
-from app.core.config import get_settings
-from app.core.db import Base
+from app.platform.config import get_settings
+from app.platform.db import Base
 
 if context.config.config_file_name:
     fileConfig(context.config.config_file_name)

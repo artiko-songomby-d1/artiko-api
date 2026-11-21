@@ -2,10 +2,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.core.db import Db
-from app.core.security import User
 from app.models import Artist
 from app.modules.artists import ArtistOut
+from app.platform.auth import User
+from app.platform.db import Db
 
 router = APIRouter(prefix="/me", tags=["me"])
 

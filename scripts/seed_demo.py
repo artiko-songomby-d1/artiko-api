@@ -14,11 +14,11 @@ import random
 from PIL import Image, ImageDraw
 from sqlalchemy import delete, select
 
-from app.core import storage
-from app.core.db import SessionLocal
 from app.core.embed import embed
 from app.models import Artist, Practice, Vote, Work
 from app.modules.works import current_month
+from app.platform import storage
+from app.platform.db import SessionLocal
 
 PRACTICES = [
     ("kabary", "Kabary", "Madagascar", "oral_arts", 120, 30, 63,

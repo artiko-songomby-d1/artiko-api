@@ -6,9 +6,6 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.core.db import Db
-from app.core.errors import ApiError
-from app.core.security import User
 from app.models import Artist, Vote, Work
 from app.modules.works import (
     MONTH,
@@ -18,6 +15,9 @@ from app.modules.works import (
     to_out,
     works_query,
 )
+from app.platform.auth import User
+from app.platform.db import Db
+from app.platform.errors import ApiError
 
 router = APIRouter(tags=["votes"])
 

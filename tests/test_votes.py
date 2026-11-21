@@ -40,7 +40,7 @@ def test_vote_on_last_month_work_refused(client):
 
     from sqlalchemy import update
 
-    from app.core.db import SessionLocal
+    from app.platform.db import SessionLocal
 
     become_artist(client, "alice")
     work = publish(client, "alice", 1).json()

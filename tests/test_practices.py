@@ -1,8 +1,8 @@
 import asyncio
 
-from app.core.db import SessionLocal
 from app.models import Practice
 from app.modules.practices import status
+from app.platform.db import SessionLocal
 
 
 def test_status_rule():
