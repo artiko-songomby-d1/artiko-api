@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from sqlalchemy import literal, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core import storage
@@ -13,7 +13,7 @@ from app.core.db import Db
 from app.core.embed import embed
 from app.core.errors import ApiError
 from app.core.security import User
-from app.models import Artist, Work
+from app.models import Artist, Vote, Work
 
 router = APIRouter(tags=["works"])
 
@@ -60,7 +60,7 @@ class WorkOut(BaseModel):
 
 def works_query():
     """Works with their artist's name and vote count, ready for `to_out`."""
-    votes = literal(0)
+    votes = select(func.count(Vote.id)).where(Vote.work_id == Work.id).correlate(Work).scalar_subquery()
     return select(Work, Artist.display_name, votes.label("votes")).join(Artist, Artist.id == Work.artist_id)
 
 
