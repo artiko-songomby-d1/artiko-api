@@ -27,8 +27,12 @@ Tests run on `TEST_DATABASE_URL` (every table is truncated between tests) and ne
 
 ## Layout
 
-- `app/core/`: config, database, errors, JWT check, storage, CLIP embeddings, similarity index, C2PA check.
-- `app/modules/`: one router per feature under `/api/v1`.
-- `app/models.py`: every table (schema `app`); Better Auth owns schema `better_auth`.
+One deployable FastAPI app, organised as a modular monolith.
+
+- `app/platform/`: infrastructure with no feature knowledge: config, database, errors, JWT auth, file storage, CLIP embeddings, contest months. `registry.py` imports every feature's tables for Alembic.
+- `app/features/<feature>/`: one package per feature (`artists`, `works`, `votes`, `practices`, `scan`, `museum`, `me`, `health`). Each holds the files it needs: `models.py` (tables), `schemas.py` (API shapes), `service.py` (rules), `queries.py` (reads), `router.py` (thin HTTP layer under `/api/v1`).
+- `app/main.py`: `create_app()` wires the routers.
 - `alembic/versions/`: one migration per table.
 - `scripts/`: model download, demo seed, known-works index.
+
+Dependency rule, checked by `tests/test_architecture.py`: platform never imports a feature (except `registry.py`), and a feature never imports another feature's `router`. Features share code through `schemas`, `queries` and `service` modules only. Order: `artists` and `works` first, then `votes`, `museum`, `scan` which build on them.
