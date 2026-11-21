@@ -10,6 +10,7 @@ from app.features.works.schemas import Category, WorkOut
 from app.platform.auth import User
 from app.platform.db import Db
 from app.platform.months import MONTH
+from app.platform.pagination import Paged
 
 router = APIRouter(tags=["works"])
 
@@ -22,12 +23,13 @@ async def list_categories() -> list[Category]:
 @router.get("/works")
 async def list_works(
     db: Db,
+    page: Paged,
     category: CategoryId | None = None,
     month: Annotated[str | None, Query(pattern=MONTH)] = None,
     artist_id: uuid.UUID | None = None,
     exposition_id: uuid.UUID | None = None,
 ) -> list[WorkOut]:
-    return await search_works(db, category, month, artist_id, exposition_id)
+    return await search_works(db, category, month, artist_id, exposition_id, page)
 
 
 @router.get("/works/{work_id}")

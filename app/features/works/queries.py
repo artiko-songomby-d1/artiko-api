@@ -10,6 +10,7 @@ from app.features.works.schemas import WorkOut
 from app.platform import storage
 from app.platform.db import Db
 from app.platform.errors import NotFound
+from app.platform.pagination import Page
 
 
 def works_query():
@@ -51,9 +52,11 @@ async def search_works(
     category: str | None,
     month: str | None,
     artist_id: uuid.UUID | None,
-    exposition_id: uuid.UUID | None = None,
+    exposition_id: uuid.UUID | None,
+    page: Page,
 ) -> list[WorkOut]:
-    q = works_query().order_by(Work.created_at.desc())
+    # `id` breaks ties so pages never repeat or skip a work created in the same instant.
+    q = works_query().order_by(Work.created_at.desc(), Work.id)
     if category:
         q = q.where(Work.category == category)
     if month:
@@ -62,4 +65,5 @@ async def search_works(
         q = q.where(Work.artist_id == artist_id)
     if exposition_id:
         q = q.where(Work.exposition_id == exposition_id)
+    q = q.limit(page.limit).offset(page.offset)
     return [to_out(*row) for row in await db.execute(q)]

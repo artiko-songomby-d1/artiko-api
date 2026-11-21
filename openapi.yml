@@ -94,9 +94,12 @@ paths:
     get:
       operationId: listArtists
       tags: [artists]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Every artist, by name
+          description: Artists by name, one page
           content:
             application/json:
               schema:
@@ -141,9 +144,11 @@ paths:
         - { name: month, in: query, schema: { $ref: "#/components/schemas/Month" } }
         - { name: artist_id, in: query, schema: { type: string, format: uuid } }
         - { name: exposition_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Works, newest first
+          description: Works, newest first, one page
           content:
             application/json:
               schema:
@@ -395,6 +400,16 @@ components:
       bearerFormat: JWT
 
   parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Page size
+      schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    Offset:
+      name: offset
+      in: query
+      description: Items to skip; request the next page with `offset += limit`
+      schema: { type: integer, minimum: 0, default: 0 }
     ArtistId:
       name: artist_id
       in: path
