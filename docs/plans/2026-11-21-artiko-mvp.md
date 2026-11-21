@@ -8,12 +8,12 @@ A visitor can check a photo (human-proven Artiko work / known work / AI-made / u
 
 ## Architecture
 
-- **API:** FastAPI, async SQLAlchemy 2 (psycopg 3 async), Alembic, PostgreSQL on Neon (dev database + separate test database). Tables in schema `app`; Better Auth owns schema `better_auth`. Routes under `/api/v1`, one router per feature in `app/modules/`, shared code in `app/core/`.
-- **Auth:** Better Auth in the Next.js app (email + password, `jwt` plugin, `bearer` plugin for Android). FastAPI verifies the JWT against `{web}/api/auth/jwks` (EdDSA). Android: `POST /api/auth/sign-in/email` → session token → `GET /api/auth/token` with `Authorization: Bearer <session>` → JWT for the API.
+- **API:** FastAPI, async SQLAlchemy 2 (psycopg 3 async), Alembic, PostgreSQL on Neon (dev database + separate test database). Tables in schema `app`. Routes under `/api/v1`, one package per feature in `app/features/`, infrastructure in `app/platform/`.
+- **Auth:** Keycloak (SOLUTION-6, 12.6), OpenID Connect with Authorization Code and PKCE. Web: Auth.js with the Keycloak provider, access token kept in an HTTP-only cookie. Android: AppAuth. FastAPI verifies each access token against the realm's JWKS (signature, expiry, issuer, audience).
 - **Scan:** CLIP ViT-B/32 image encoder (ONNX, quantized, `onnxruntime`) → 512-d normalized vector stored as `float4[]`; similarity by numpy dot product over an in-memory matrix loaded at startup (no pgvector on this machine; ~10k × 512 floats = 20 MB). C2PA manifest read with `c2pa-python`.
 - **Files:** stored on local disk under `MEDIA_DIR`, served at `/media`. SHA-256 per file.
 
-Decision: Better Auth instead of Keycloak - same JWT/JWKS shape for the API, no extra container on a 7.4 GB machine; Keycloak can replace it by changing `AUTH_JWKS_URL`/issuer only.
+Decision: Keycloak, as SOLUTION-6 specifies. An earlier draft of this plan used Better Auth to save a container on a small dev machine; that was dropped because it diverged from the spec and from the Android AppAuth flow.
 Decision: numpy similarity instead of pgvector - pgvector not installed; swap later by adding a `vector(512)` column.
 Decision: local disk instead of MinIO - one less service for the demo.
 Decision: no Museum table - the museum layout is computed from the artist's works (walls for 2D, plinths for 3D).
@@ -57,7 +57,7 @@ Errors: `{"error": {"code", "message"}}`.
 
 ## Tasks (web)
 
-9. **Auth + API client** - swap `next-auth` → `better-auth` + `pg`; `src/lib/{auth,auth-client,api}.ts`, `src/app/api/auth/[...all]/route.ts`, sign-in/up pages; generated types from OpenAPI (`@hey-api/openapi-ts`) in `src/lib/api-types/`. **verify:** sign up in browser, `GET /api/v1/me` from the page returns the user.
+9. **Auth + API client** - keep `next-auth` (Auth.js) and add the Keycloak provider with token refresh; `src/lib/{auth,api}.ts`, `src/app/api/auth/[...nextauth]/route.ts`; generated client from OpenAPI (`@hey-api/openapi-ts`) in `src/lib/api-client/`. **verify:** sign in through Keycloak, a server component calls `GET /api/v1/me` with the cookie's access token and gets the user.
 10. **Layout + Home + Explore** - nav (Home, Explore, Hall of Fame, Index, Check a photo, Me), category filter, work cards with the human-made badge. **verify:** `pnpm build` + browser check against seeded API.
 11. **Artist 3D museum + vote** - `src/app/artists/[id]/page.tsx` + client `Museum.tsx` (R3F room from `slots`, click a work → panel with story, proof, vote button), 2D gallery fallback toggle. **verify:** browser: walk, open a work, vote → count updates; 2nd vote → message.
 12. **Hall of Fame** - `src/app/hall-of-fame/page.tsx` (category × month, top 5 podium, rendered in the same 3D room with 5 slots). **verify:** browser against seeded votes.

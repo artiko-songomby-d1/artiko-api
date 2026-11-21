@@ -10,10 +10,11 @@ class Settings(BaseSettings):
     # TestClient runs each request on a fresh event loop, so pooled connections must be off there.
     db_pool: bool = True
 
-    # Better Auth (in artiko-web) signs the JWTs; issuer and audience are its base URL.
-    auth_jwks_url: str = "http://localhost:3000/api/auth/jwks"
-    auth_issuer: str = "http://localhost:3000"
-    auth_audience: str = "http://localhost:3000"
+    # Keycloak signs the access tokens (SOLUTION-6, 12.6). Defaults match the local dev realm `lova`;
+    # `auth_audience` is the audience claim Keycloak adds for this API (an audience mapper on the client).
+    auth_jwks_url: str = "http://localhost:8080/realms/lova/protocol/openid-connect/certs"
+    auth_issuer: str = "http://localhost:8080/realms/lova"
+    auth_audience: str = "lova-api"
     cors_origins: str = "http://localhost:3000"
 
     media_dir: str = "media"
