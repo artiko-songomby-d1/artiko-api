@@ -13,7 +13,7 @@ from app.core.db import Db
 from app.core.embed import embed
 from app.core.errors import ApiError
 from app.core.security import User
-from app.models import Artist, Vote, Work
+from app.models import Artist, Exposition, Vote, Work
 
 router = APIRouter(tags=["works"])
 
@@ -47,6 +47,7 @@ class WorkOut(BaseModel):
     title: str
     story: str
     category: CategoryId
+    exposition_id: uuid.UUID | None
     media_url: str
     media_kind: Literal["image", "audio", "video", "model"]
     proof_urls: list[str]
@@ -72,6 +73,7 @@ def to_out(work: Work, artist_name: str, votes: int) -> WorkOut:
         title=work.title,
         story=work.story,
         category=work.category,
+        exposition_id=work.exposition_id,
         media_url=storage.media_url(work.media_path),
         media_kind=work.media_kind,
         proof_urls=[storage.media_url(p) for p in work.proof_paths],
@@ -102,6 +104,7 @@ async def list_works(
     category: CategoryId | None = None,
     month: Annotated[str | None, Query(pattern=MONTH)] = None,
     artist_id: uuid.UUID | None = None,
+    exposition_id: uuid.UUID | None = None,
 ) -> list[WorkOut]:
     q = works_query().order_by(Work.created_at.desc())
     if category:
@@ -110,6 +113,8 @@ async def list_works(
         q = q.where(Work.month == month)
     if artist_id:
         q = q.where(Work.artist_id == artist_id)
+    if exposition_id:
+        q = q.where(Work.exposition_id == exposition_id)
     return [to_out(*row) for row in await db.execute(q)]
 
 
@@ -127,11 +132,16 @@ async def create_work(
     file: Annotated[UploadFile, File()],
     story: Annotated[str, Form(max_length=5000)] = "",
     ai_declared: Annotated[bool, Form()] = False,
+    exposition_id: Annotated[uuid.UUID | None, Form()] = None,
     proof: Annotated[list[UploadFile] | None, File()] = None,
 ) -> WorkOut:
     artist = await db.scalar(select(Artist).where(Artist.user_id == user.id))
     if artist is None:
         raise ApiError(403, "not_an_artist", "Create your artist profile first (PUT /me/artist)")
+    if exposition_id and not await db.scalar(
+        select(Exposition.id).where(Exposition.id == exposition_id, Exposition.artist_id == artist.id)
+    ):
+        raise ApiError(400, "invalid_exposition", "Choose one of your own expositions")
     proof = proof or []
     if len(proof) > 5:
         raise ApiError(400, "too_many_proofs", "At most 5 proof files")
@@ -151,6 +161,7 @@ async def create_work(
         title=title,
         story=story,
         category=category,
+        exposition_id=exposition_id,
         media_path=storage.save(data, ext),
         media_kind=kind,
         proof_paths=proof_paths,

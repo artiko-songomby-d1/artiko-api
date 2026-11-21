@@ -118,6 +118,7 @@ paths:
         - { name: category, in: query, schema: { $ref: "#/components/schemas/CategoryId" } }
         - { name: month, in: query, schema: { $ref: "#/components/schemas/Month" } }
         - { name: artist_id, in: query, schema: { type: string, format: uuid } }
+        - { name: exposition_id, in: query, schema: { type: string, format: uuid } }
       responses:
         "200":
           description: Works, newest first
@@ -148,6 +149,10 @@ paths:
                 story: { type: string, maxLength: 5000, default: "" }
                 category: { $ref: "#/components/schemas/CategoryId" }
                 ai_declared: { type: boolean, default: false }
+                exposition_id:
+                  type: string
+                  format: uuid
+                  description: One of the artist's own expositions (`invalid_exposition`, 400, otherwise)
                 file: { type: string, format: binary }
                 proof:
                   type: array
@@ -480,6 +485,7 @@ components:
         title: { type: string }
         story: { type: string }
         category: { $ref: "#/components/schemas/CategoryId" }
+        exposition_id: { type: [string, "null"], format: uuid, description: Always present; null when the work is in no exposition }
         media_url: { type: string, format: uri }
         media_kind: { $ref: "#/components/schemas/MediaKind" }
         proof_urls:
