@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # POST /scan/image is public and runs the CLIP model: smaller photos and a per-client rate cap.
     scan_max_upload_mb: int = 5
     scan_rate_limit_per_minute: int = 20
+    # All clients together: the CLIP model is the bottleneck, so a client rotating IPs still cannot exceed this.
+    scan_global_rate_limit_per_minute: int = 120
     # Header the hosting proxy overwrites with the client IP (e.g. x-real-ip). Empty = the socket peer.
     # Never name a header a client can send itself, or the rate limit can be dodged.
     client_ip_header: str = ""

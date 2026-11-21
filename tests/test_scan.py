@@ -62,3 +62,19 @@ def test_scan_rejects_photos_over_its_own_size_limit(client, monkeypatch):
     big = png(1, size=(1200, 1200)) + b"\0" * (1024 * 1024)
     r = send(client, big)
     assert r.status_code == 413 and r.json()["error"]["code"] == "file_too_large"
+
+
+def test_scan_has_a_global_cap_that_changing_address_cannot_get_around(client, monkeypatch):
+    from app.platform.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "scan_global_rate_limit_per_minute", 2)
+    monkeypatch.setattr(get_settings(), "client_ip_header", "x-real-ip")
+
+    def scan_from(address: str):
+        return client.post(
+            "/api/v1/scan/image",
+            files={"file": ("photo.png", png(1), "image/png")},
+            headers={"X-Real-IP": address},
+        ).status_code
+
+    assert [scan_from(f"198.51.100.{i}") for i in range(3)] == [200, 200, 429]

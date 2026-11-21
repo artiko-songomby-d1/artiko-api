@@ -1,4 +1,4 @@
-from app.platform.rate_limit import MAX_TRACKED_CLIENTS, WINDOW_SECONDS, SlidingWindowLimiter
+from app.platform.rate_limit import MAX_TRACKED_CLIENTS, WINDOW_SECONDS, SlidingWindowLimiter, normalise
 
 
 def test_blocks_after_the_limit_and_reports_the_wait():
@@ -20,9 +20,16 @@ def test_window_slides():
     assert limiter.check("a", 1, now=WINDOW_SECONDS + 1) is None
 
 
-def test_idle_clients_are_forgotten_so_memory_stays_bounded():
+def test_memory_stays_bounded_even_when_every_client_is_recent():
     limiter = SlidingWindowLimiter()
-    for i in range(MAX_TRACKED_CLIENTS):
+    for i in range(MAX_TRACKED_CLIENTS + 500):
         limiter.check(f"c{i}", 5, now=0)
-    limiter.check("new", 5, now=WINDOW_SECONDS + 10)
-    assert len(limiter.hits) == 1
+    assert len(limiter.hits) == MAX_TRACKED_CLIENTS
+    assert "c0" not in limiter.hits and f"c{MAX_TRACKED_CLIENTS + 499}" in limiter.hits
+
+
+def test_ipv6_addresses_of_one_network_are_one_client():
+    assert normalise("2001:db8:1:2:aaaa:bbbb:cccc:dddd") == normalise("2001:db8:1:2::1")
+    assert normalise("2001:db8:1:2::1") != normalise("2001:db8:1:3::1")
+    assert normalise("203.0.113.7") == "203.0.113.7"
+    assert normalise("not-an-ip") == "not-an-ip"

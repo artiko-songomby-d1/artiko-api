@@ -16,7 +16,13 @@ limiter = SlidingWindowLimiter()
 
 @router.post(
     "/image",
-    dependencies=[limit_per_minute(limiter, lambda: get_settings().scan_rate_limit_per_minute)],
+    dependencies=[
+        limit_per_minute(
+            limiter,
+            lambda: get_settings().scan_rate_limit_per_minute,
+            lambda: get_settings().scan_global_rate_limit_per_minute,
+        )
+    ],
 )
 async def scan_image(file: Annotated[UploadFile, File()], db: Db) -> ScanResult:
     """The photo is only read in memory, never stored."""
