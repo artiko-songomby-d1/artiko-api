@@ -179,6 +179,54 @@ paths:
               schema: { $ref: "#/components/schemas/Work" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/expositions:
+    get:
+      operationId: listExpositions
+      tags: [expositions]
+      parameters:
+        - { name: artist_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Expositions, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Exposition" }
+    post:
+      operationId: createExposition
+      tags: [expositions]
+      summary: Create an exposition to group one's works (artists only)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpositionIn" }
+      responses:
+        "201":
+          description: The exposition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exposition" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /api/v1/expositions/{exposition_id}:
+    parameters:
+      - { name: exposition_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getExposition
+      tags: [expositions]
+      responses:
+        "200":
+          description: The exposition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exposition" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/v1/votes:
     post:
       operationId: castVote
@@ -477,6 +525,29 @@ components:
         slots:
           type: array
           items: { $ref: "#/components/schemas/MuseumSlot" }
+
+    ExpositionIn:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 2000, default: "" }
+
+    Exposition:
+      type: object
+      required: [id, artist_id, artist_name, title, description, cover_url, works_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        artist_id: { type: string, format: uuid }
+        artist_name: { type: string }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        cover_url:
+          type: [string, "null"]
+          format: uri
+          description: The newest image work of the exposition, null when it has none
+        works_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
 
     Vote:
       type: object
