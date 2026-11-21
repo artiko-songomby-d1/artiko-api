@@ -35,6 +35,28 @@ paths:
                 properties:
                   status: { type: string, const: ok }
 
+  /api/v1/ready:
+    get:
+      operationId: ready
+      tags: [health]
+      summary: Readiness probe
+      description: |
+        `/health` only says the process is alive and never touches the database.
+        This one also checks that the database answers.
+      responses:
+        "200":
+          description: The API can serve requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+        "503":
+          description: The database is not reachable (`not_ready`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
   /api/v1/me:
     get:
       operationId: getMe

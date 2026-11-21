@@ -51,6 +51,10 @@ class TooManyRequests(ApiError):
         super().__init__(code, message, {"Retry-After": str(retry_after)})
 
 
+class ServiceUnavailable(ApiError):
+    status = 503
+
+
 def _body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 
