@@ -127,13 +127,20 @@ paths:
       operationId: getMuseum
       tags: [artists]
       summary: The artist's 3D museum, laid out by the API so web and Android render the same room
+      description: |
+        Selects works oldest first, with their IDs breaking timestamp ties.
+        Each page has a separate room layout. An offset past the end returns an empty room.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: The room
+          description: The room for this page of works
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Museum" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
 
   /api/v1/works:
     get:
@@ -327,14 +334,17 @@ paths:
       tags: [expositions]
       parameters:
         - { name: artist_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Expositions, newest first
+          description: Expositions, newest first, one page with IDs breaking timestamp ties
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Exposition" }
+        "422": { $ref: "#/components/responses/Invalid" }
     post:
       operationId: createExposition
       tags: [expositions]

@@ -50,6 +50,10 @@ With `RATE_LIMIT_REDIS_URL` unset, the scan, signed proof download, and device e
 
 Uploads go to the bucket when `MEDIA_BUCKET` is set (local `MEDIA_DIR` otherwise) and are served by the API at `/media/<sha256>.<ext>`. A free instance sleeps after 15 idle minutes: open `/api/v1/health` a minute before a demo.
 
+## Pagination
+
+`GET /api/v1/expositions` and `GET /api/v1/artists/{artist_id}/museum` accept `limit` (default 100, maximum 200) and `offset` (default 0). Increase `offset` by `limit` to fetch the next page. Expositions are listed newest first. The museum selects an artist's works oldest first and lays out a separate room for each page.
+
 ## Layout
 
 One deployable FastAPI app, organised as a modular monolith.

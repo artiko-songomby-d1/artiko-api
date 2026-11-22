@@ -78,8 +78,8 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
   comme prévu pour CLIP (`scan/index.py:3`).
 - [ ] **19. `refresh` de l'index à chaque scan** (`scan/service.py:27`) : 2 requêtes DB par scan sous
   verrou global ; un TTL suffirait.
-- [ ] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` renvoient tout, avec
-  les preuves.
+- [x] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` utilisent
+  `limit` et `offset`. Le musée charge les preuves et calcule la salle pour les œuvres de la page.
 - [x] **21. CORS `allow_credentials=True`** : option retirée. Les origines configurées peuvent
   toujours envoyer l'en-tête `Authorization` pour l'authentification bearer.
 - [x] **22. Détail de l'erreur JWT renvoyé au client** : réponse 401 générique. Le type d'erreur est
