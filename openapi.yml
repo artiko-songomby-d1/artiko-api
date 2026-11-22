@@ -592,7 +592,7 @@ components:
       name: offset
       in: query
       description: Items to skip; request the next page with `offset += limit`
-      schema: { type: integer, minimum: 0, default: 0 }
+      schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
     ArtistId:
       name: artist_id
       in: path

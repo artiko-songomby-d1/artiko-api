@@ -62,6 +62,9 @@ def test_cases_are_paged_oldest_first(client, reviewer):
     assert [c["id"] for c in client.get(CASES, headers=reviewer).json()] == [first, second]
     page = client.get(CASES, params={"limit": 1, "offset": 1}, headers=reviewer).json()
     assert [c["id"] for c in page] == [second]
+    assert client.get(CASES, params={"offset": 1_000_000}, headers=reviewer).json() == []
+    too_far = client.get(CASES, params={"offset": 10**30}, headers=reviewer)
+    assert too_far.status_code == 422 and too_far.json()["error"]["code"] == "invalid_request"
 
 
 def test_retrying_a_refused_file_reuses_the_open_case(client):
