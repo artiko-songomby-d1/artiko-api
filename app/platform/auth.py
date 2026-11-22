@@ -13,7 +13,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.platform.config import get_settings
-from app.platform.errors import Unauthorized
+from app.platform.errors import Forbidden, Unauthorized
 
 log = logging.getLogger(__name__)
 _bearer = HTTPBearer(auto_error=False)
@@ -112,3 +112,12 @@ async def optional_user(
 
 User = Annotated[CurrentUser, Depends(current_user)]
 OptionalUser = Annotated[CurrentUser | None, Depends(optional_user)]
+
+
+async def current_reviewer(user: User) -> CurrentUser:
+    if not user.is_reviewer:
+        raise Forbidden("not_a_reviewer", "Only reviewers may do this")
+    return user
+
+
+Reviewer = Annotated[CurrentUser, Depends(current_reviewer)]

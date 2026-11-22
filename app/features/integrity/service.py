@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.features.integrity.queries import nearest_phash_matches
-from app.features.review.service import open_possible_copy
+from app.features.review.service import is_cleared, open_possible_copy
 from app.features.scan.index import get_index
 from app.features.works.checks import Candidate
 from app.platform.config import get_settings
@@ -58,9 +58,12 @@ async def _hits(db: Db, candidate: Candidate) -> tuple[Hit | None, Hit | None]:
 
 
 async def check_copy(db: Db, candidate: Candidate) -> uuid.UUID | None:
-    """Refuses a work that copies another artist's or a known work; returns the artist's own earlier work it repeats."""
+    """Refuses a work that copies another artist's or a known work, unless a reviewer cleared this file; returns the
+    artist's own earlier work it repeats."""
     foreign, own = await _hits(db, candidate)
-    if foreign is not None:
+    if foreign is not None and not await is_cleared(
+        db, artist_id=candidate.artist_id, candidate_sha256=candidate.sha256
+    ):
         case = await open_possible_copy(
             db,
             artist_id=candidate.artist_id,

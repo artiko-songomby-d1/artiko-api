@@ -1,20 +1,25 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.platform.db import Base
+
+OPEN = "open"
+CLEARED = "cleared"
+CONFIRMED = "confirmed"
 
 
 class ReviewCase(Base):
     """Something a reviewer has to look at: a possible copy, and later reports."""
 
     __tablename__ = "review_case"
+    __table_args__ = (Index("ix_review_case_artist_candidate", "artist_id", "candidate_sha256"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     reason: Mapped[str] = mapped_column(String(30), index=True)
-    status: Mapped[str] = mapped_column(String(10), default="open", index=True)
+    status: Mapped[str] = mapped_column(String(10), default=OPEN, index=True)
     # The work under review; empty when the publication was refused, so no work exists.
     work_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("work.id", ondelete="CASCADE"), nullable=True)
     # What the work looks like: an ARTIKO work or a known work.
@@ -29,3 +34,6 @@ class ReviewCase(Base):
     # Which signal raised it: "clip" (semantic similarity) or "phash" (perceptual hash).
     signal: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The Better Auth user id of the reviewer who decided the case, and when.
+    decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

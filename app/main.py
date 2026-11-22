@@ -14,6 +14,7 @@ from app.features.me.router import router as me
 from app.features.media.router import router as media
 from app.features.museum.router import router as museum
 from app.features.practices.router import router as practices
+from app.features.review.router import router as review
 from app.features.scan.index import invalidate_index
 from app.features.scan.router import router as scan
 from app.features.votes.router import router as votes
@@ -25,7 +26,7 @@ from app.platform.http_security import install_security_headers
 from app.platform.rate_limit import RedisSlidingWindowLimiter
 
 API_PREFIX = "/api/v1"
-ROUTERS = (health, me, devices, artists, expositions, museum, works, votes, practices, scan)
+ROUTERS = (health, me, devices, artists, expositions, museum, works, votes, practices, scan, review)
 
 
 def create_app() -> FastAPI:
