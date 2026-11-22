@@ -1,6 +1,6 @@
 # Spec: ai-generated-detection (Sightengine `genai`, free plan)
 
-Branch: `feat/ai-generated-detection` (from `develop` at `156f568`). Status: **approved by the user on 2026-11-22** (threshold set to 0.8). Written 2026-11-22.
+Branch: `feat/ai-generated-detection` (from `develop` at `156f568`). Status: **approved by the user on 2026-11-22** (threshold set to 0.8). **Amended 2026-11-22 after the three reviews** (AC24 to AC30, AC14, AC19 and AC22 adjusted; rate limit 10 and 30 a minute, EXIF documented, Render free plan confirmed by the user). Written 2026-11-22.
 
 This replaces the abandoned content-moderation feature (nudity, hate, violence, self-harm). That work is kept as a backup on the local branch `feat/content-moderation` and is not part of this spec.
 
@@ -44,7 +44,7 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 - **AC11 (unreadable MP4).** Given an MP4 that ffprobe cannot read, with no video stream, or with a duration that is not a number above 0, then the response is 400 `unreadable_video` and nothing is stored.
 - **AC12 (frame fallback).** Given a position that yields no frame (a very short video), then the extraction is retried once at 0 s; frames with the same effective position are checked once.
 - **AC13 (ffmpeg missing).** Given ffmpeg or ffprobe cannot be started, then the video is accepted (fail-open) and an error is logged.
-- **AC14 (ffmpeg hardening).** Given any ffprobe or ffmpeg process: it is started without a shell, with an argument list that never contains an uploaded file name; its environment contains only `PATH`; the input is a file in a private temporary directory (mode 0700) removed in every outcome; it carries `-protocol_whitelist file`, `-format_whitelist mov,mp4,m4a,3gp,3g2,mj2` and `-max_alloc 268435456`; it runs under `prlimit --data=1073741824`; it is killed after 30 s; the whole video check stops after 60 s. At most 2 video checks run at once (the others wait).
+- **AC14 (ffmpeg hardening).** Given any ffprobe or ffmpeg process: it is started without a shell, with an argument list that never contains an uploaded file name; its environment contains only `PATH`; the input is a file in a private temporary directory (mode 0700) removed in every outcome; it carries `-protocol_whitelist file`, `-format_whitelist mov,mp4,m4a,3gp,3g2,mj2` and `-max_alloc 268435456`; it runs under `prlimit --data=<AC27 memory cap>`; it is killed after 30 s; the whole video check, including the wait for a video slot, stops after 60 s (AC26). At most `AI_DETECTION_MAX_VIDEO_CHECKS` (default 1) video checks run at once (the others wait inside that deadline).
 
 ### Not checked
 - **AC15 (3D, audio, proofs).** Given a GLB work (with or without `poster` and `model_hd`), an audio file, or any proof file, then nothing is sent and nothing is refused. They behave as today.
@@ -55,11 +55,20 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 - **AC18 (rate limiter).** Given any Sightengine requests, then one process-wide limiter makes any two requests start at least 1.1 s apart (the free plan allows 1 request per second). A request that waits more than `AI_DETECTION_WAIT_SECONDS` (default 30) for its turn counts as a failure (AC16).
 
 ### Contract, order, privacy
-- **AC19 (order).** Given `publish_work`, then the check runs after the artist, exposition, proof-count and duplicate-file checks and before the embedding, the copy-detection checks, the proof reading and any `storage.save`. A refused file opens no review case.
+- **AC19 (order).** Given `publish_work`, then the check runs after the artist, exposition, proof-count, proof-claims and duplicate-file checks (every cheap validation, so a bad request spends no operation) and before the embedding, the copy-detection checks, the proof reading and any `storage.save`. A refused file opens no review case.
 - **AC20 (error body).** Given a refusal, then the body is `{"error": {"code": "ai_generated_content", "message": "...", "field": "file"}}` with HTTP 400. The score is never returned.
 - **AC21 (openapi).** `openapi.yml` documents the 400 `ai_generated_content`, `unsupported_video_format` and `unreadable_video` responses of `POST /works`, and `tests/test_contract.py` still passes.
-- **AC22 (what leaves).** Given any request, then only the main file of an image work, or the frames cut from the main file of an MP4 work, are sent to Sightengine. No title, story, text, proof file, 3D file or artist data is ever sent.
+- **AC22 (what leaves).** Given any request, then only the main file of an image work, or the frames cut from the main file of an MP4 work, are sent to Sightengine. No title, story, text, proof file, 3D file or artist data is ever sent. An image is sent as the file it is, so its embedded metadata (EXIF: GPS, camera, author) is sent too; the README privacy note says so.
 - **AC23 (logs).** Given any outcome, then logs never contain credentials, file bytes or scores. A refusal is logged at INFO with `field` only.
+
+### Hardening added after the review of 2026-11-22
+- **AC24 (publish rate limit).** Given `AI_DETECTION_PROVIDER=sightengine`, when `POST /works` is called, then each authenticated user may send at most `WORKS_RATE_LIMIT_PER_MINUTE` (default 10) and all users together at most `WORKS_GLOBAL_RATE_LIMIT_PER_MINUTE` (default 30) requests per minute; beyond that the response is 429 with `Retry-After`, using the project's existing limiter (as `proof_limiter`, `app/features/works/router.py`). With provider `none` nothing changes (AC1).
+- **AC25 (robust answer parsing).** Given any error while reading or parsing the Sightengine answer (a body that is not JSON, a deeply nested body that raises `RecursionError`, a body over 1 MiB, an unexpected shape), then the work is accepted (AC16) and never a 500. The answer is read with a 1 MiB cap. An upstream error code is logged only when it is a short alphanumeric string or an integer (at most 20 characters), otherwise `unknown`.
+- **AC26 (bounded waits).** Given a video check, then the wait for a video slot counts inside the 60 s deadline; when it expires the work is accepted unchecked with a WARNING.
+- **AC27 (memory).** Given an image over 12 MB, then a copy is built only when `width x height` is at most 40,000,000 pixels (above it: accepted unchecked with a WARNING) and at most one such copy is built at a time. Given ffmpeg and ffprobe, then the `prlimit --data` cap is configurable (`AI_DETECTION_FFMPEG_MEMORY_MB`) and its default is the smallest value, at most 512, with which the 1080p and the noisy 3840x2160 MP4 test files still give 3 frames; the measured value is reported. This fits a 512 MB instance (Render free plan; the RAM figure is unverified).
+- **AC28 (settings validation).** Given the settings, then the app refuses to start (naming the variable) when `AI_DETECTION_THRESHOLD` is not a finite number in (0, 1], `AI_DETECTION_WAIT_SECONDS` is negative, a limit or the video slot count is below 1, or a Sightengine credential is empty after trimming spaces.
+- **AC29 (timeouts accept).** Given ffprobe or ffmpeg killed by its 30 s timeout, then the work is accepted unchecked with a WARNING, not refused as `unreadable_video`. A file that ffprobe rejects quickly (non-zero exit), has no video stream or has no duration stays a 400 `unreadable_video` (AC11).
+- **AC30 (limiter fairness).** Given a request cancelled while waiting for its turn (client disconnect), then its slot is released and does not delay later requests.
 
 ## Out of scope
 
@@ -68,6 +77,9 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 - Text, audio (including AI music and speech detection), 3D works, proof files.
 - Sightengine's video endpoints, deepfake detection and any paid-plan feature.
 - Re-checking works that are already published.
+- Two artists publishing the same file at the same instant hanging `POST /works` (reported by a reviewer, unverified on `develop`, not part of this feature).
+- The Dockerfile running as root (existing, no `USER` line).
+- Stripping image metadata before sending (documented in the README instead, by decision).
 - Showing the refusal in artiko-web and artiko-mobile (follow-up: both must display the `message` of a 400 `ai_generated_content`, and offer the `ai_declared` choice).
 
 ## Edge cases and errors
@@ -80,6 +92,7 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 | Image between 12 MB and 20 MB | A shrunk copy is checked (AC8). The API accepts up to 20 MB (`max_upload_mb`, `app/platform/config.py`). |
 | Free quota spent (500 a day, 2,000 a month) | `usage_limit`: accepted unchecked (AC16) until the quota resets. |
 | Video where only some frames look AI | Refused when the highest frame reaches the threshold (AC9). Observed: one frame at 0.001, one at 0.99, one at 0.68: refused because of the 0.99 frame. Without it, 0.68 alone would be accepted. |
+| Many MP4 publishes at once | Each MP4 needs 3 Sightengine requests, 1.1 s apart, so about 54 requests a minute fit. Past that, requests wait up to 30 s and the excess is accepted unchecked (fail-open, by decision). The AC24 limits make this rare. |
 | Two publishes at the same time | The limiter serializes requests (AC18); the second may wait up to 30 s, then is accepted unchecked. |
 | Client disconnects during a video check | The check stops and the temporary directory is removed (AC14). Nothing is stored. |
 | 4K MP4 | Frames are scaled to 1280 px wide, so every frame stays small. |
