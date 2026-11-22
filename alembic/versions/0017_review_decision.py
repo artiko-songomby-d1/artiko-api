@@ -21,6 +21,19 @@ def upgrade() -> None:
     op.create_index(
         "ix_review_case_artist_candidate", "review_case", ["artist_id", "candidate_sha256"], schema="app"
     )
+    # Concurrent refusals could open the same case twice before the index below existed. The extra open cases
+    # carry no decision, so they are deleted, keeping the oldest; marking them decided would change the outcome.
+    op.execute(
+        """
+        DELETE FROM app.review_case AS duplicate
+        USING app.review_case AS kept
+        WHERE duplicate.status = 'open' AND duplicate.reason = 'possible_copy'
+          AND kept.status = 'open' AND kept.reason = 'possible_copy'
+          AND kept.artist_id = duplicate.artist_id
+          AND kept.candidate_sha256 = duplicate.candidate_sha256
+          AND (kept.created_at, kept.id) < (duplicate.created_at, duplicate.id)
+        """
+    )
     # At most one open possible-copy case per artist and file, even when the same file is refused concurrently.
     op.create_index(
         "uq_review_case_open_possible_copy",
