@@ -171,7 +171,8 @@ paths:
         `ai_generated_content`. Audio, 3D files, posters and proof files are never sent. When Sightengine cannot
         answer, the work is accepted. While AI detection is on, each user may send 10 works a minute to the
         check and all users together 30; past that the API answers 429 with a `Retry-After` header. Only a publish
-        that reaches Sightengine counts: one refused before the check, or never checked, costs nothing.
+        that reaches Sightengine counts: one refused before the check, or never checked, costs nothing. This limit
+        does not protect the daily Sightengine quota: once it is spent, works are accepted unchecked.
       security: [{ bearer: [] }]
       requestBody:
         required: true
