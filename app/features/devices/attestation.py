@@ -2,13 +2,19 @@
 
 import base64
 import binascii
-from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
+from cryptography.x509.verification import (
+    Criticality,
+    ExtensionPolicy,
+    Policy,
+    PolicyBuilder,
+    Store,
+    VerificationError,
+)
 
 ATTESTATION_OID = x509.ObjectIdentifier("1.3.6.1.4.1.11129.2.1.17")
 LEVELS = {0: "software", 1: "tee", 2: "strongbox"}
@@ -65,29 +71,56 @@ def parse_chain(chain: list[str]) -> list[x509.Certificate]:
         raise AttestationError("the attestation chain is not valid DER") from e
 
 
+def _may_sign_certificates(_policy: Policy, _cert: x509.Certificate, usage: x509.KeyUsage | None) -> None:
+    if usage is not None and not usage.key_cert_sign:
+        raise ValueError("a certificate that signs another one may not sign certificates")
+
+
+# What a certificate must say to sign another one. Without it anybody could use the genuine attested key of their
+# own phone as a CA and issue a leaf with any security level and challenge. BasicConstraints is only named here:
+# the library itself then demands cA and enforces pathLenConstraint. The Web PKI defaults are not used because
+# they demand fields (KeyUsage on every CA, a SAN on the leaf) that attestation chains do not all have.
+_SIGNER_POLICY = (
+    ExtensionPolicy.permit_all()
+    .require_present(x509.BasicConstraints, Criticality.AGNOSTIC, None)
+    .may_be_present(x509.KeyUsage, Criticality.AGNOSTIC, _may_sign_certificates)
+)
+
+
+def _carries_attestation(cert: x509.Certificate) -> bool:
+    try:
+        return any(extension.oid == ATTESTATION_OID for extension in cert.extensions)
+    except ValueError as e:
+        raise AttestationError("a certificate of the chain has unreadable extensions") from e
+
+
 def verify_chain(chain: list[x509.Certificate], roots: list[x509.Certificate]) -> None:
-    """Every certificate is valid now and signed by the next one; the last is signed by (or is) a trusted root."""
+    """The first certificate leads to a trusted root through CAs valid now, and it alone carries an attestation.
+
+    The other certificates are candidates for that path, not the path itself: the root is always ours, so the
+    copy a phone sends (often an older issue of the same root) does not count.
+    """
     if not chain:
         raise AttestationError("empty attestation chain")
-    now = datetime.now(UTC)
-    for cert in chain:
-        if not cert.not_valid_before_utc <= now <= cert.not_valid_after_utc:
-            raise AttestationError("a certificate of the chain is expired or not yet valid")
+    verifier = (
+        PolicyBuilder()
+        .store(Store(roots))
+        .extension_policies(ca_policy=_SIGNER_POLICY, ee_policy=ExtensionPolicy.permit_all())
+        .build_client_verifier()
+    )
     try:
-        for cert, issuer in zip(chain, chain[1:], strict=False):
-            cert.verify_directly_issued_by(issuer)
-    except (InvalidSignature, ValueError, TypeError) as e:
-        raise AttestationError("the attestation chain is not linked") from e
-    top = chain[-1]
-    algorithm = top.signature_hash_algorithm
-    trusted = [r for r in roots if r.fingerprint(algorithm) == top.fingerprint(algorithm)]
-    if not trusted:
-        try:
-            trusted = [r for r in roots if top.verify_directly_issued_by(r) is None]
-        except (InvalidSignature, ValueError, TypeError):
-            trusted = []
-    if not trusted:
-        raise AttestationError("the attestation chain does not end at a trusted root")
+        path = verifier.verify(chain[0], chain[1:]).chain
+    except VerificationError as e:
+        raise AttestationError(f"the attestation chain is not trusted: {e}") from e
+    # A genuine CA never carries the extension: a signer that does is itself an attested key, used to forge a leaf.
+    if any(_carries_attestation(cert) for cert in path[1:]):
+        raise AttestationError("only the key's own certificate may carry an attestation")
+
+
+def refuse_revoked(chain: list[x509.Certificate], revoked: frozenset[str]) -> None:
+    """`revoked` holds serial numbers as Google lists them: lowercase hexadecimal without leading zeros."""
+    if any(format(cert.serial_number, "x") in revoked for cert in chain):
+        raise AttestationError("a certificate of the attestation chain has been revoked")
 
 
 def leaf_statement(leaf: x509.Certificate) -> tuple[str, bytes]:

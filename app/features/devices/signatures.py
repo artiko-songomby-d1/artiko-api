@@ -8,9 +8,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 
-def message(sha256_hex: str, captured_at_ms: int, draft_id: str, nonce: str | None) -> bytes:
-    """What the phone signs: the file's SHA-256, the capture time, the draft it belongs to and the challenge nonce."""
-    return f"{sha256_hex}|{captured_at_ms}|{draft_id}|{nonce or ''}".encode()
+def message(sha256_hex: str, captured_at_ms: int, draft_id: str, nonce: str) -> bytes:
+    """What the phone signs: the file's SHA-256, the capture time, the draft it belongs to and the server's nonce."""
+    return f"{sha256_hex}|{captured_at_ms}|{draft_id}|{nonce}".encode()
 
 
 def is_valid(public_key_b64: str, signed: bytes, signature_b64: str) -> bool:

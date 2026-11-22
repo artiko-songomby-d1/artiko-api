@@ -12,6 +12,10 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 Relecture des correctifs le 2026-11-22 sur `develop` (`af790c5`, PR #24 et #25) : 18 à 24 corrigés, 1 et 3
 partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non lancé (`uv` absent).
 
+Correctifs suivants, même jour : 2, 4, 5, 6, 7, 10 à 15 et 17 corrigés et retirés de cette liste. Suite
+complète lancée sur l'ensemble (Postgres et disque locaux) : 266 tests réussis, 2 ignorés. Non vérifié en
+production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari iOS.
+
 ## 🔴 Sécurité / intégrité (priorité haute)
 
 - [ ] **1. Le badge « human proven » est gratuit** — *partiellement corrigé.*
@@ -25,13 +29,6 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
     capture signée de l'app Android est disponible.
   - Décision du 2026-11-22 : garder `true` en prod pour l'instant. Avec `false`, le web n'envoyant que des
     preuves importées, plus personne n'obtiendrait le badge ni ne pourrait voter.
-- [ ] **2. Vérification de l'attestation Android incomplète** (`devices/attestation.py:68`) :
-  - aucune vérification que les certificats intermédiaires sont des CA (`BasicConstraints ca=True`,
-    `keyCertSign`) : un attaquant qui possède une clé attestée légitime (son propre téléphone) pourrait
-    s'en servir comme « CA » et signer un faux leaf avec n'importe quel niveau / challenge
-    (plausible, à prouver par un test) ;
-  - pas de contrôle de la liste de révocation Google des clés d'attestation ;
-  - la présence de l'extension d'attestation sur un autre certificat que le leaf n'est pas refusée.
 - [ ] **3. Rate limit inefficace derrière Render** — *corrigé, hypothèse à confirmer.*
   - Fait : `render.yaml` déclare `CLIENT_IP_HEADER=CF-Connecting-IP`, `PROOF_URL_SECRET`, `NONCE_SECRET`,
     `ATTESTATION_PROVIDER` et `ALLOW_IMPORTED_PROOFS_FOR_BADGE`. Une valeur d'en-tête qui n'est pas une IP
@@ -43,59 +40,36 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
   - Procédure (à faire par l'équipe, pas automatisée) : envoyer ~21 `POST /api/v1/scan/image` en moins
     d'une minute, chacun avec un `CF-Connecting-IP` forgé différent. Une réponse 429 avant la fin prouve
     que l'en-tête forgé est ignoré ; aucune 429 prouve qu'il est pris comme clé (à corriger).
-- [ ] **4. Endpoints coûteux sans rate limit** : `POST /works` (jusqu'à 6 × 20 Mo en mémoire + CLIP),
-  `POST /votes`, `PUT /me/artist`, `POST /expositions`. Chaque `POST /works` refusé pour copie crée en
-  plus un `ReviewCase` en base (`integrity/service.py:65`) → la table peut être spammée.
-- [ ] **5. Bombe de décompression d'image.** Aucune limite `Image.MAX_IMAGE_PIXELS` ni contrôle des
-  dimensions (`storage.py:43`, `embed.py:30`, `phash.py:13`). Un PNG de 5 Mo peut décoder ~89 M pixels
-  (≈ 270 Mo en RGB) : OOM probable sur l'instance Render free. → Plafonner les pixels avant
-  `convert()` / `resize()`.
-- [ ] **6. Format d'image non vérifié contre le type déclaré** : `is_image` accepte tout ce que Pillow
-  sait ouvrir (GIF, BMP, TIFF…) puis le stocke en `.png` / `.jpg` (`storage.py:67`). → Comparer
-  `Image.format` au content-type.
-- [ ] **7. Rejeu des captures signées** : le nonce est optionnel dans le message signé
-  (`devices/signatures.py:13`), jamais revalidé ni marqué utilisé ; la même preuve signée peut servir
-  à plusieurs œuvres pendant 10 min.
 - [ ] **8. Vote sans email vérifié** : `CurrentUser` ne lit aucun claim `email_verified` (`auth.py:89`) ;
   avec l'inscription libre côté web, comptes jetables = votes multiples.
-  → En revue : PR #18 (`feat/verified-email-tokens`, base `develop`) refuse les jetons dont le claim
-  `emailVerified` n'est pas `true` (403 `email_not_verified`). `develop` y est fusionné, le conflit avec
-  le point 22 est résolu ; ruff OK, pytest 150 passed / 2 skipped (Docker, Postgres 17 jetable).
+  - La vérification d'e-mail à l'inscription existe sur `develop` d'artiko-web (`src/lib/auth.ts`,
+    `requireEmailVerification: true`), pas encore sur son `main`.
+  - Décision du 2026-11-22 : d'abord la PR #29 (refus du vote seulement, derrière
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=false` par défaut), à activer quand le web vérifie les e-mails en prod.
+  - PR #18 (refus de toute requête d'un compte non vérifié) passée en brouillon : à reprendre après le
+    déploiement du web, en l'adaptant à #29 (les deux touchent `auth.py`).
 - [ ] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé dans la PR #27, en revue.*
   - Constat : artiko-web (`src/lib/auth.ts`) n'active que les plugins `jwt`, `bearer`,
     `breachedPasswordCheck` et `nextCookies`, sans champ `role` : le JWT n'a jamais de claim `role`, donc
     personne n'était reviewer (et personne ne pouvait s'attribuer le rôle).
-  - Correctif : les reviewers sont désignés côté API par `REVIEWER_USER_IDS` (ids Better Auth, vide =
-    personne) ; le claim `role` n'est plus lu. À renseigner à la main dans le tableau de bord Render
-    (`sync: false`).
-- [ ] **10. CI** (`.github/workflows/ci.yml`) : `push` seulement sur `main` (pas `develop`) ; les jobs
-  `test` et `docker` n'ont pas de bloc `permissions:` ; actions épinglées par tag et non par SHA.
-- [ ] **11. Dockerfile** : tourne en root, image de base non épinglée par digest ; `alembic upgrade head`
-  au démarrage de chaque instance (course si plusieurs instances).
+  - Correctif : reviewers désignés côté API par `REVIEWER_USER_IDS` (ids Better Auth, vide = personne) ;
+    le claim `role` n'est plus lu. À renseigner à la main dans le tableau de bord Render (`sync: false`).
 
 ## 🟠 Bugs
 
-- [ ] **12. Appels bloquants dans l'event loop** : `storage.save` / `storage.load` (boto3 synchrone) sont
-  appelés depuis des `async def` (`works/service.py:81`, `:101`, `works/router.py:114`), de même que
-  `kind_of` (décodage Pillow) et la recherche numpy de l'index. Un upload S3 lent fige toute l'API.
-  → `run_in_threadpool` ou client S3 asynchrone.
-- [ ] **13. Pas de requêtes `Range` sur `/media`** (`media/router.py:10`) : le fichier entier est chargé
-  en mémoire et renvoyé en 200. Safari iOS exige des réponses 206 pour lire une vidéo MP4 → vidéos
-  probablement illisibles sur iPhone (à confirmer). → Redirection vers une URL S3 présignée, ou réponse
-  streamée avec support des ranges.
-- [ ] **14. Fichiers orphelins** : l'œuvre et ses preuves sont écrites dans le stockage avant le `commit`
-  (`works/service.py:81`, `:101`) ; un `IntegrityError` laisse les fichiers.
-- [ ] **15. Course sur `upsert_artist_of_user`** (`artists/service.py:28`) : deux premiers `PUT` simultanés
-  → `IntegrityError` sur `user_id` unique → 500 au lieu d'un upsert.
 - [ ] **16. Les cas de revue n'ont aucun endpoint** : `ReviewCase` est créé (`review/service.py:9`) mais
   aucun routeur `review` n'est monté (`main.py:23`). Une œuvre signalée « possible copy » reste bloquée,
-  sans recours. → *Corrigé dans la PR #27, en revue* : `GET /review/cases` (paginé, filtre `status`) et
-  `POST /review/cases/{id}/decision` (`cleared` | `confirmed`, réservés aux reviewers). `cleared` laisse
-  le même artiste republier le même fichier (même SHA-256). Un fichier refusé renvoyé réutilise le cas
-  ouvert (une partie du point 4). Migration `0016`. ruff OK, pytest 159 passed / 2 skipped.
-  Reste : relier le cas levé à l'œuvre publiée ensuite ; aucune interface web pour ces routes.
-- [ ] **17. Index de similarité jamais purgé** (`scan/index.py:52`) : il ne fait qu'ajouter, et chaque
-  processus garde sa propre copie (incohérence entre instances).
+  sans recours. → *Corrigé dans la PR #27, en revue.*
+  - `GET /review/cases` (paginé, filtre `status`) et `POST /review/cases/{id}/decision`
+    (`cleared` | `confirmed`), réservés aux reviewers ; un reviewer ne tranche pas son propre cas
+    (403 `own_case`).
+  - `cleared` laisse le même artiste republier le même fichier (même SHA-256). Un cas `confirmed` est
+    définitif : un renvoi le réutilise et il l'emporte sur un `cleared`.
+  - Un seul cas ouvert par artiste et fichier, même en concurrence (index unique partiel + `ON CONFLICT`).
+    Migration `0017` : supprime d'abord les cas ouverts en double déjà présents.
+  - Pagination : `offset` plafonné à 1 000 000 (422 au-delà, au lieu d'un 500).
+  - Relu deux fois par les trois relecteurs ; suite complète : 281 tests réussis, 2 ignorés.
+  - Reste : relier un cas levé à l'œuvre publiée ensuite ; aucune interface web pour ces routes.
 
 ## 🟡 Architecture / dette
 
@@ -123,4 +97,6 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
 
 ## Ordre suggéré
 
-5, 12 et 13 d'abord (disponibilité en prod), puis la fin du 1 (intégrité du concours), puis 2, 4 et 16.
+Merger #27 (9 et 16) puis #29 (8). Ensuite : la confirmation du 3 en prod, l'activation du vote réservé aux
+e-mails vérifiés dès que le web vérifie les e-mails en prod, et la fin du 1 quand l'app Android capture des
+preuves signées.

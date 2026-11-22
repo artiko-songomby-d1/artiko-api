@@ -54,9 +54,11 @@ async def publish_work(
         raise BadRequest("too_many_proofs", f"At most {MAX_PROOFS} proof files")
 
     data = await storage.read_upload(file)
-    kind, ext = storage.kind_of(file, data)
+    # Decoding, hashing and storing a file of several megabytes all block: they run in a worker thread, so that
+    # one slow publication does not freeze every other request.
+    kind, ext = await run_in_threadpool(storage.kind_of, file, data)
     hd, still = await _read_model_extras(kind, model_hd, poster)
-    fingerprint = storage.sha256(data)
+    fingerprint = await run_in_threadpool(storage.sha256, data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
         raise Conflict("duplicate_work", "This exact file is already published on Artiko")
     # Hashed before it is embedded: a picture that cannot be decoded is refused here, with a 400.
@@ -69,17 +71,23 @@ async def publish_work(
     prints = []
     for i, p in enumerate(proof):
         p_data = await storage.read_upload(p)
-        proof_kind, proof_ext = storage.kind_of(p, p_data)
-        proof_sha = storage.sha256(p_data)
+        proof_kind, proof_ext = await run_in_threadpool(storage.kind_of, p, p_data)
+        proof_sha = await run_in_threadpool(storage.sha256, p_data)
         claim = proof_claims[i] if proof_claims else None
         checked.append((p_data, proof_ext, await verify_proof(db, user.id, proof_sha, claim)))
         prints.append(Fingerprint(proof_sha, await _image_hash(p, p_data) if proof_kind == "image" else None))
     # Every file that makes up the work: none of them is evidence of how it was made.
     work_files = [Fingerprint(fingerprint, image_hash)]
+    hd_sha = still_sha = None
     if hd:
-        work_files.append(Fingerprint(storage.sha256(hd[0]), None))
+        hd_sha = await run_in_threadpool(storage.sha256, hd[0])
+        work_files.append(Fingerprint(hd_sha, None))
     if still:
-        work_files.append(Fingerprint(storage.sha256(still[0]), await _image_hash(poster, still[0])))
+        still_sha = await run_in_threadpool(storage.sha256, still[0])
+        work_files.append(Fingerprint(still_sha, await _image_hash(poster, still[0])))
+    # (bytes, extension, private) of each file to store. Stored names are fingerprints, so the rows can name
+    # their files before a single byte is written.
+    to_store = [(data, ext, False), *((*extra, False) for extra in (hd, still) if extra)]
     proofs = []
     now = datetime.now(UTC)
     for i, (p_data, proof_ext, evidence) in enumerate(checked):
@@ -87,7 +95,7 @@ async def publish_work(
         # Spaced by a microsecond so the proofs keep the order they were sent in.
         proofs.append(
             WorkProof(
-                path=storage.save(p_data, proof_ext, private=proof_visibility != PUBLIC),
+                path=storage.stored_name(prints[i].sha256, proof_ext),
                 visibility=proof_visibility,
                 created_at=now + timedelta(microseconds=i),
                 source=evidence.source,
@@ -100,6 +108,7 @@ async def publish_work(
                 integrity_verdict=evidence.integrity_verdict,
             )
         )
+        to_store.append((p_data, proof_ext, proof_visibility != PUBLIC))
 
     work = Work(
         artist_id=artist.id,
@@ -107,10 +116,10 @@ async def publish_work(
         story=story,
         category=category,
         exposition_id=exposition_id,
-        media_path=storage.save(data, ext),
+        media_path=storage.stored_name(fingerprint, ext),
         media_kind=kind,
-        media_hd_path=storage.save(*hd) if hd else None,
-        poster_path=storage.save(*still) if still else None,
+        media_hd_path=storage.stored_name(hd_sha, hd[1]) if hd else None,
+        poster_path=storage.stored_name(still_sha, still[1]) if still else None,
         proofs=proofs,
         sha256=fingerprint,
         ai_declared=ai_declared,
@@ -122,6 +131,13 @@ async def publish_work(
     )
     db.add(work)
     try:
+        # The rows go in first and the files follow: the unique fingerprint refuses a file published twice at
+        # the same instant before anything of the losing request is written, so a refusal leaves no orphan.
+        # Cleaning up after the fact would be unsafe: names are content hashes, the same proof can belong to two
+        # works, and of two simultaneous requests the one that wrote the file first can be the one refused.
+        await db.flush()
+        for stored in to_store:
+            await run_in_threadpool(storage.save, *stored)
         await db.commit()
     except IntegrityError as e:  # the same file published at the same instant
         raise Conflict("duplicate_work", "This exact file is already published on Artiko") from e
@@ -144,7 +160,7 @@ async def _read_model_extras(
 async def _read_as(upload: UploadFile, expected_kind: str, code: str, message: str) -> tuple[bytes, str]:
     data = await storage.read_upload(upload)
     try:
-        kind, ext = storage.kind_of(upload, data)
+        kind, ext = await run_in_threadpool(storage.kind_of, upload, data)
     except BadRequest as e:
         raise BadRequest(code, message) from e
     if kind != expected_kind:

@@ -1,6 +1,7 @@
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.features.artists.models import Artist
 from app.features.artists.schemas import ArtistIn
@@ -26,10 +27,16 @@ async def artist_of_user(db: Db, user_id: str) -> Artist | None:
 
 
 async def upsert_artist_of_user(db: Db, user_id: str, body: ArtistIn) -> Artist:
-    artist = await artist_of_user(db, user_id)
-    if artist is None:
-        artist = Artist(user_id=user_id)
-        db.add(artist)
-    artist.display_name, artist.bio, artist.region = body.display_name, body.bio, body.region
+    profile = {"display_name": body.display_name, "bio": body.bio, "region": body.region}
+    # One statement instead of select-then-insert: two first PUTs of the same account at the same moment both found
+    # no row, and the second INSERT broke the unique `user_id` (a 500). Here the second one waits, then updates.
+    q = (
+        insert(Artist)
+        .values(user_id=user_id, **profile)
+        .on_conflict_do_update(index_elements=[Artist.user_id], set_=profile)
+        .returning(Artist)
+    )
+    # populate_existing: an artist this session already loaded must show what was just written, not what it read.
+    artist = (await db.scalars(q, execution_options={"populate_existing": True})).one()
     await db.commit()
     return artist
