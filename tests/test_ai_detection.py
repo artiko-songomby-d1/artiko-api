@@ -103,7 +103,7 @@ def test_image_that_cannot_be_shrunk_is_accepted_unchecked(image, monkeypatch, c
     monkeypatch.setattr(ai_detection, "MAX_IMAGE_BYTES", 200)
     fake = FakeSightengine(0.99)
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
-        asyncio.run(detector(fake).check_main_file(image, "image", ".png", ai_declared=False))
+        asyncio.run(detector(fake).check_main_file(image, "image", ".png", ai_declared=False, requester="u"))
     assert fake.requests == []
     assert caplog.messages == ["AI detection skipped (image file): over 200 bytes after shrinking"]
 
@@ -121,7 +121,7 @@ def test_an_image_over_20_m_pixels_is_accepted_without_a_copy(size, monkeypatch,
     monkeypatch.setattr(Image.Image, "convert", lambda *a, **k: pytest.fail("the image was decoded"))
     fake = FakeSightengine(0.99)
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
-        asyncio.run(detector(fake).check_main_file(bilevel_png(*size), "image", ".png", ai_declared=False))
+        asyncio.run(detector(fake).check_main_file(bilevel_png(*size), "image", ".png", False, "u"))
     assert fake.requests == []
     assert caplog.messages == ["AI detection skipped (image file): over 20000000 pixels"]
 
@@ -154,7 +154,7 @@ def test_one_shrunk_copy_is_built_at_a_time(monkeypatch):
 
     async def three_large_images_at_once():
         image = noise_png(64, 64)
-        await asyncio.gather(*(checker.check_main_file(image, "image", ".png", False) for _ in range(3)))
+        await asyncio.gather(*(checker.check_main_file(image, "image", ".png", False, "u") for _ in range(3)))
 
     asyncio.run(three_large_images_at_once())
     assert most == 1
@@ -168,7 +168,7 @@ def test_missing_ffmpeg_is_fail_open(caplog):
     ):
         caplog.clear()
         with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
-            asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", ai_declared=False))
+            asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False, "u"))
         assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
             (logging.ERROR, "AI detection skipped (video file): ffmpeg or ffprobe cannot be started")
         ]
@@ -188,7 +188,7 @@ def test_a_tool_killed_at_its_timeout_accepts_the_video(hanging, tmp_path, caplo
     fake = FakeSightengine(0.99)
     frames = VideoFrames(ffmpeg_runner(timeout_seconds=0.3), **{hanging: tool(tmp_path, hanging, "exec sleep 30")})
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
-        asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", ai_declared=False))
+        asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", ai_declared=False, requester="u"))
     assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
         (logging.WARNING, "AI detection skipped (video file): ffmpeg or ffprobe timed out")
     ]
@@ -198,14 +198,15 @@ def test_a_tool_killed_at_its_timeout_accepts_the_video(hanging, tmp_path, caplo
 def test_a_probe_that_fails_quickly_refuses_the_video(tmp_path):
     frames = VideoFrames(ffmpeg_runner(), ffprobe=tool(tmp_path, "ffprobe", "exit 1"))
     with pytest.raises(BadRequest) as error:
-        asyncio.run(detector(FakeSightengine(0.1), frames).check_main_file(VIDEO, "video", ".mp4", False))
+        asyncio.run(detector(FakeSightengine(0.1), frames).check_main_file(VIDEO, "video", ".mp4", False, "u"))
     assert error.value.code == "unreadable_video"
 
 
 def test_a_probed_video_ffmpeg_cannot_cut_is_accepted_unchecked(caplog):
     fake = FakeSightengine(0.99)
+    frames = VideoFrames(FrameStarvedRunner())
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
-        asyncio.run(detector(fake, VideoFrames(FrameStarvedRunner())).check_main_file(VIDEO, "video", ".mp4", False))
+        asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False, "u"))
     assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
         (logging.WARNING, "AI detection skipped (video file): ffmpeg extracted no frame")
     ]
@@ -219,9 +220,9 @@ def test_a_video_with_fewer_than_three_frames_is_checked_with_a_warning(score, r
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
         if refused:
             with pytest.raises(BadRequest):
-                asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False))
+                asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False, "u"))
         else:
-            asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False))
+            asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False, "u"))
     assert caplog.messages == ["AI detection partial (video file): 1 of 3 frames extracted"]
     assert len(fake.requests) == 1
 
@@ -245,7 +246,7 @@ def test_video_checks_past_the_slot_count_wait(slots):
     checker = AiDetector(FakeSightengine(0.99).client(), frames, threshold=0.8, max_video_checks=slots)
 
     async def three_checks():
-        checks = [asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False)) for _ in range(3)]
+        checks = [asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False, "u")) for _ in range(3)]
         await asyncio.sleep(0.05)
         assert frames.entered == slots
         frames.release.set()
@@ -260,11 +261,11 @@ def test_the_wait_for_a_video_slot_counts_in_the_deadline(monkeypatch, caplog):
     checker = detector(FakeSightengine(0.99), frames)
 
     async def second_check_waits_behind_a_stuck_one():
-        stuck = asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False))
+        stuck = asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False, "u"))
         await asyncio.sleep(0.01)
         monkeypatch.setattr(ai_detection, "VIDEO_CHECK_SECONDS", 0.2)
         started = time.monotonic()
-        await checker.check_main_file(VIDEO, "video", ".mp4", False)
+        await checker.check_main_file(VIDEO, "video", ".mp4", False, "u")
         waited = time.monotonic() - started
         frames.release.set()
         await stuck
@@ -284,7 +285,7 @@ def test_one_detector_serves_one_event_loop_after_another():
     checker = detector(FakeSightengine(0.99), frames)
 
     async def three_checks_contending_for_the_slots():
-        checks = [asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False)) for _ in range(3)]
+        checks = [asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False, "u")) for _ in range(3)]
         await asyncio.sleep(0.01)
         frames.release.set()
         await asyncio.gather(*checks)
@@ -298,7 +299,8 @@ def test_one_detector_serves_one_event_loop_after_another():
 def test_video_check_stops_at_its_deadline(monkeypatch, caplog):
     monkeypatch.setattr(ai_detection, "VIDEO_CHECK_SECONDS", 0.05)
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
-        asyncio.run(detector(FakeSightengine(0.99), BlockedFrames()).check_main_file(VIDEO, "video", ".mp4", False))
+        check = detector(FakeSightengine(0.99), BlockedFrames()).check_main_file(VIDEO, "video", ".mp4", False, "u")
+        asyncio.run(check)
     assert caplog.messages == ["AI detection stopped (video file): over 0 s"]
 
 
@@ -312,7 +314,7 @@ def test_video_check_stops_at_its_deadline(monkeypatch, caplog):
 )
 def test_partial_frame_failure(answers, refused):
     fake = FakeSightengine(*answers)
-    check = detector(fake).check_main_file(VIDEO, "video", ".mp4", ai_declared=False)
+    check = detector(fake).check_main_file(VIDEO, "video", ".mp4", ai_declared=False, requester="u")
     if refused:
         with pytest.raises(BadRequest) as error:
             asyncio.run(check)

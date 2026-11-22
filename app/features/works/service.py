@@ -61,7 +61,7 @@ async def publish_work(
     fingerprint = storage.sha256(data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
         raise Conflict("duplicate_work", "This exact file is already published on Artiko")
-    await ai_detector.check_main_file(data, kind, ext, ai_declared)
+    await ai_detector.check_main_file(data, kind, ext, ai_declared, requester=user.id)
     embedding = (await run_in_threadpool(embed, data)).tolist() if kind == "image" else None
     image_hash = await run_in_threadpool(phash, data) if kind == "image" else None
     earlier = await run_publish_checks(db, Candidate(artist.id, fingerprint, kind, embedding, image_hash))

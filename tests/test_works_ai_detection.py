@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, text
 from app.features.works import service as works_service
 from app.main import app
 from app.platform import storage
-from app.platform.ai_detection import AI_REFUSAL, MAX_IMAGE_BYTES, AiDetector, get_ai_detector
+from app.platform.ai_detection import AI_REFUSAL, MAX_IMAGE_BYTES, AiDetector, get_ai_detector, spend_check_budget
 from app.platform.config import get_settings
 from app.platform.sightengine import CHECK_URL
 from app.platform.video_frames import VideoFrames
@@ -30,7 +30,7 @@ GLB = "model/gltf-binary"
 def sightengine():
     fake = FakeSightengine(0.1)
     app.dependency_overrides[get_ai_detector] = lambda: AiDetector(
-        fake.client(), VideoFrames(ffmpeg_runner()), threshold=0.8
+        fake.client(), VideoFrames(ffmpeg_runner()), threshold=0.8, budget=spend_check_budget
     )
     yield fake
     app.dependency_overrides.pop(get_ai_detector, None)
@@ -68,6 +68,13 @@ def glb(seed: int) -> bytes:
 
 def webm(seed: int) -> bytes:
     return b"\x1a\x45\xdf\xa3" + seed.to_bytes(4, "little") + b"\x00" * 32
+
+
+def noise_png(seed: int) -> bytes:
+    """An image unlike any other artist's, so the copy check lets it through."""
+    buffer = io.BytesIO()
+    Image.fromarray(np.random.default_rng(seed).integers(0, 256, (64, 64, 3), dtype=np.uint8)).save(buffer, "PNG")
+    return buffer.getvalue()
 
 
 def is_jpeg(data: bytes) -> bool:
@@ -292,10 +299,10 @@ def test_logs_hold_no_secret_bytes_or_score(client, sightengine, caplog):
 
 def test_publishing_is_rate_limited_per_user_and_overall(client, sightengine, monkeypatch):
     settings = get_settings()
-    monkeypatch.setattr(settings, "ai_detection_provider", "sightengine")
     monkeypatch.setattr(settings, "works_rate_limit_per_minute", 2)
     monkeypatch.setattr(settings, "works_global_rate_limit_per_minute", 3)
-    become_artist(client, "alice")
+    for artist in ("alice", "carol", "dave"):
+        become_artist(client, artist)
 
     assert [publish(client, "alice", seed).status_code for seed in (1, 2)] == [201, 201]
     refused = publish(client, "alice", 3)
@@ -303,10 +310,42 @@ def test_publishing_is_rate_limited_per_user_and_overall(client, sightengine, mo
     assert 1 <= int(refused.headers["Retry-After"]) <= 61
     assert len(sightengine.requests) == 2
 
-    assert publish(client, "bob", 4).status_code == 403  # counted: not an artist, but the request was sent
-    overall = publish(client, "carol", 5)
+    assert post_file(client, "noise.png", noise_png(4), "image/png", user="carol").status_code == 201
+    overall = publish(client, "dave", 5)
     assert overall.status_code == 429 and "Retry-After" in overall.headers
-    assert len(sightengine.requests) == 2
+    assert len(sightengine.requests) == 3
+    assert count("SELECT count(*) FROM app.work") == 3
+
+
+def test_only_a_publish_sent_to_sightengine_spends_the_budget(client, sightengine, monkeypatch):
+    monkeypatch.setattr(get_settings(), "works_rate_limit_per_minute", 1)
+    monkeypatch.setattr(get_settings(), "works_global_rate_limit_per_minute", 1)
+    assert [publish(client, "bob", 1).status_code for _ in range(3)] == [403, 403, 403]
+    become_artist(client, "alice")
+    untitled = {"category": "painting"}
+    files = [("file", ("w.png", png(1), "image/png"))]
+    assert client.post("/api/v1/works", data=untitled, files=files, headers=auth("alice")).status_code == 422
+    assert publish(client, "alice", 1, exposition_id=str(uuid.uuid4())).status_code == 400
+    assert publish(client, "alice", 1, proofs=0, ai_declared="true").status_code == 201
+    assert publish(client, "alice", 1, proofs=0).status_code == 409
+    assert post_file(client, "scan.glb", glb(1), GLB, category="sculpture").status_code == 201
+    assert post_file(client, "v.webm", webm(1), "video/webm").status_code == 400
+    assert post_file(client, "v.mp4", audio_only_mp4(), "video/mp4").status_code == 400
+    assert sightengine.requests == []
+
+    assert publish(client, "alice", 2, proofs=0).status_code == 201
+    refused = publish(client, "alice", 3, proofs=0)
+    assert refused.status_code == 429 and "Retry-After" in refused.headers
+    assert len(sightengine.requests) == 1
+
+
+def test_a_checked_video_spends_one_publish_of_the_budget(client, sightengine, monkeypatch):
+    monkeypatch.setattr(get_settings(), "works_rate_limit_per_minute", 2)
+    become_artist(client, "alice")
+    assert post_file(client, "v.mp4", mp4(seconds=2, size="320x240"), "video/mp4").status_code == 201
+    assert len(sightengine.requests) == 3
+    assert publish(client, "alice", 1, proofs=0).status_code == 201
+    assert publish(client, "alice", 2, proofs=0).status_code == 429
 
 
 def test_publishing_is_not_rate_limited_when_detection_is_off(client, monkeypatch):

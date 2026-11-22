@@ -18,6 +18,7 @@ from PIL import Image
 from app.platform import storage
 from app.platform.config import get_settings
 from app.platform.errors import BadRequest
+from app.platform.rate_limit import SlidingWindowLimiter, enforce_limits
 from app.platform.sightengine import REQUEST_SPACING_SECONDS, Credentials, RequestSpacer, Sightengine
 from app.platform.video_frames import (
     FRAME_SHARES,
@@ -48,6 +49,24 @@ AI_REFUSAL = (
 
 
 T = TypeVar("T")
+CheckBudget = Callable[[str], None]
+check_limiter = SlidingWindowLimiter()
+
+
+def spend_check_budget(requester: str) -> None:
+    """Each check spends Sightengine operations from a small free quota: cap the checks per user and overall.
+
+    Raises TooManyRequests past either cap. Runs in the event loop with no await, so two threads never touch the
+    limiter.
+    """
+    settings = get_settings()
+    per_user, overall = settings.works_rate_limit_per_minute, settings.works_global_rate_limit_per_minute
+    # The prefix keeps a user id from ever matching the limiter's global key.
+    enforce_limits(check_limiter, f"user:{requester}", per_user, overall)
+
+
+def unlimited(requester: str) -> None:
+    """A budget that never refuses."""
 
 
 class PerLoop(Generic[T]):
@@ -68,28 +87,38 @@ class PerLoop(Generic[T]):
 
 class AiDetector:
     def __init__(
-        self, sightengine: Sightengine | None, frames: VideoFrames, threshold: float, max_video_checks: int = 1
+        self,
+        sightengine: Sightengine | None,
+        frames: VideoFrames,
+        threshold: float,
+        max_video_checks: int = 1,
+        budget: CheckBudget = unlimited,
     ):
-        self._sightengine, self._frames, self._threshold = sightengine, frames, threshold
+        self._sightengine, self._frames, self._threshold, self._budget = sightengine, frames, threshold, budget
         self._video_slots = PerLoop(lambda: asyncio.Semaphore(max_video_checks))
         self._shrink_slot = PerLoop(asyncio.Lock)
 
-    async def check_main_file(self, data: bytes, kind: str, ext: str, ai_declared: bool) -> None:
-        """Raises BadRequest when the main file must be refused; returns in every other case, checked or not."""
+    async def check_main_file(self, data: bytes, kind: str, ext: str, ai_declared: bool, requester: str) -> None:
+        """Raises BadRequest when the main file must be refused, TooManyRequests when `requester` or everyone used up
+        the check budget; returns in every other case, checked or not.
+
+        The budget is spent only right before the first Sightengine request, so a file that is never sent costs none.
+        """
         if self._sightengine is None or ai_declared:
             return
         if kind == "image":
-            score = await self._image_score(self._sightengine, data, ext)
+            score = await self._image_score(self._sightengine, data, ext, requester)
         elif kind == "video":
-            score = await self._video_score(self._sightengine, data, ext)
+            score = await self._video_score(self._sightengine, data, ext, requester)
         else:
             return
         if score is not None and score >= self._threshold:
             log.info("main file refused as AI-generated (field=file)")
             raise BadRequest("ai_generated_content", AI_REFUSAL, details=FILE_FIELD)
 
-    async def _image_score(self, sightengine: Sightengine, data: bytes, ext: str) -> float | None:
+    async def _image_score(self, sightengine: Sightengine, data: bytes, ext: str, requester: str) -> float | None:
         if len(data) <= MAX_IMAGE_BYTES:
+            self._budget(requester)
             return await sightengine.ai_generated_score(data, IMAGE_CONTENT_TYPES[ext], "image")
         try:
             async with self._shrink_slot.get():
@@ -100,16 +129,17 @@ class AiDetector:
         if copy is None:
             log.warning("AI detection skipped (image file): over %d bytes after shrinking", MAX_IMAGE_BYTES)
             return None
+        self._budget(requester)
         return await sightengine.ai_generated_score(copy, "image/jpeg", "image")
 
-    async def _video_score(self, sightengine: Sightengine, data: bytes, ext: str) -> float | None:
+    async def _video_score(self, sightengine: Sightengine, data: bytes, ext: str, requester: str) -> float | None:
         """The highest score of the frames checked before the deadline, which includes the wait for a video slot."""
         if ext != ".mp4":
             raise BadRequest("unsupported_video_format", "Only MP4 videos are accepted", details=FILE_FIELD)
         scores: list[float] = []
         try:
             async with asyncio.timeout(VIDEO_CHECK_SECONDS), self._video_slots.get():
-                await self._score_frames(sightengine, data, scores)
+                await self._score_frames(sightengine, data, requester, scores)
         except UnreadableVideo as e:
             message = "This video cannot be read: send a valid MP4"
             raise BadRequest("unreadable_video", message, details=FILE_FIELD) from e
@@ -121,12 +151,13 @@ class AiDetector:
             log.warning("AI detection stopped (video file): over %d s", VIDEO_CHECK_SECONDS)
         return max(scores, default=None)
 
-    async def _score_frames(self, sightengine: Sightengine, data: bytes, scores: list[float]) -> None:
+    async def _score_frames(self, sightengine: Sightengine, data: bytes, requester: str, scores: list[float]) -> None:
         """Appends each score as it comes, so the frames checked before a timeout still count."""
         frames = await self._frames.extract(data)
         if not frames:
             log.warning("AI detection skipped (video file): ffmpeg extracted no frame")
             return
+        self._budget(requester)
         for frame in frames:
             score = await sightengine.ai_generated_score(frame, "image/jpeg", "video")
             if score is not None:
@@ -174,7 +205,13 @@ def get_ai_detector() -> AiDetector:
         spacer = RequestSpacer(REQUEST_SPACING_SECONDS)
         sightengine = Sightengine(credentials, spacer, settings.ai_detection_wait_seconds)
     frames = VideoFrames(ProcessRunner(settings.ai_detection_ffmpeg_memory_mb))
-    return AiDetector(sightengine, frames, settings.ai_detection_threshold, settings.ai_detection_max_video_checks)
+    return AiDetector(
+        sightengine,
+        frames,
+        settings.ai_detection_threshold,
+        settings.ai_detection_max_video_checks,
+        spend_check_budget,
+    )
 
 
 AiCheck = Annotated[AiDetector, Depends(get_ai_detector)]
