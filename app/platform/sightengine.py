@@ -25,7 +25,10 @@ LOGGABLE_CODE = re.compile(r"[A-Za-z0-9]{1,20}")
 
 
 class RequestSpacer:
-    """Starts the requests that share it at least `spacing` seconds apart, in arrival order."""
+    """Starts the requests that share it at least `spacing` seconds apart, in arrival order.
+
+    A request cancelled while it waits (a client that disconnects) gives its start back to the next one.
+    """
 
     def __init__(
         self,
@@ -34,17 +37,30 @@ class RequestSpacer:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._spacing, self._clock, self._sleep = spacing, clock, sleep
-        self._next_start = float("-inf")
+        self._starts: list[float] = []
 
     async def wait_turn(self, max_wait: float) -> bool:
         """Waits for the next free start; False, without taking it, when it is more than `max_wait` seconds away."""
         now = self._clock()
-        start = max(now, self._next_start)
+        self._starts = [taken for taken in self._starts if taken > now - self._spacing]
+        start = self._first_free_start(now)
         if start - now > max_wait:
             return False
-        self._next_start = start + self._spacing
-        await self._sleep(start - now)
+        self._starts.append(start)
+        try:
+            await self._sleep(start - now)
+        except asyncio.CancelledError:
+            self._starts.remove(start)
+            raise
         return True
+
+    def _first_free_start(self, now: float) -> float:
+        start = now
+        for taken in sorted(self._starts):
+            if start + self._spacing <= taken:
+                break
+            start = max(start, taken + self._spacing)
+        return start
 
 
 @dataclass(frozen=True)

@@ -194,3 +194,49 @@ def test_only_a_short_plain_error_code_is_logged(code, logged, caplog):
         fake = FakeSightengine(httpx.Response(200, json=body))
         assert asyncio.run(fake.client().ai_generated_score(b"jpeg", "image/jpeg", "image")) is None
     assert caplog.messages == [f"AI detection skipped (image file): sightengine_{logged}"]
+
+
+def test_a_waiter_cancelled_before_its_turn_releases_its_slot():
+    spacing = 0.5
+    spacer = RequestSpacer(spacing)
+
+    async def first_takes_a_turn_second_is_cancelled_third_waits():
+        started = time.monotonic()
+        assert await spacer.wait_turn(max_wait=5)
+        second = asyncio.create_task(spacer.wait_turn(max_wait=5))
+        await asyncio.sleep(0.05)
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        third_asked = time.monotonic()
+        assert await spacer.wait_turn(max_wait=5)
+        return time.monotonic() - third_asked, time.monotonic() - started
+
+    third_waited, since_first = asyncio.run(first_takes_a_turn_second_is_cancelled_third_waits())
+    # It starts one spacing after the first, not two: the cancelled turn was given back.
+    assert since_first == pytest.approx(spacing, abs=0.1)
+    assert third_waited == pytest.approx(spacing - 0.05, abs=0.1)
+
+
+def test_a_slot_freed_between_two_taken_ones_is_reused():
+    clock = FakeClock()
+
+    async def sleep_until_cancelled(seconds: float) -> None:
+        clock.sleeps.append(seconds)
+        if seconds:
+            await asyncio.Event().wait()
+
+    spacer = RequestSpacer(1.0, clock=clock, sleep=sleep_until_cancelled)
+
+    async def middle_waiter_cancelled():
+        assert await spacer.wait_turn(10)
+        second, third = (asyncio.create_task(spacer.wait_turn(10)) for _ in range(2))
+        await asyncio.sleep(0)
+        second.cancel()
+        fourth = asyncio.create_task(spacer.wait_turn(10))
+        await asyncio.sleep(0)
+        for task in (third, fourth):
+            task.cancel()
+
+    asyncio.run(middle_waiter_cancelled())
+    assert clock.sleeps == pytest.approx([0, 1.0, 2.0, 1.0])
