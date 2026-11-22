@@ -13,6 +13,12 @@ MAX_FRAME_WIDTH = 1280
 # Local MP4 and MOV files only: a playlist (HLS, DASH, concat) would make ffmpeg open other files or URLs.
 # A tiny MP4 whose sample table declares millions of samples otherwise makes the demuxer allocate gigabytes.
 INPUT_GUARD = ["-protocol_whitelist", "file", "-format_whitelist", "mov,mp4,m4a,3gp,3g2,mj2", "-max_alloc", "268435456"]
+# One thread each keeps memory low and steady under the prlimit cap.
+SINGLE_THREAD_INPUT = ["-threads", "1"]
+SINGLE_THREAD_OUTPUT = ["-filter_threads", "1", "-threads", "1"]
+# A BLAS library linked into ffmpeg starts one worker per CPU at start-up, each reserving about 128 MiB: under the
+# cap that reservation never succeeds and the process hangs. One worker fits.
+SINGLE_THREADED_LIBRARIES = {"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
 PROBE_ENTRIES = "stream=codec_type:stream_disposition=attached_pic:format=duration"
 # prlimit reports a command it could not execute with these exit codes.
 NOT_EXECUTABLE = {126, 127}
@@ -31,7 +37,8 @@ class UnreadableVideo(Exception):
 
 
 class ProcessRunner:
-    """Runs a command without a shell, under prlimit, with only PATH in its environment, killed at its time limit.
+    """Runs a command without a shell, under prlimit, killed at its time limit, with only PATH and the
+    single-thread switches in its environment.
 
     `memory_limit_mb` caps the total memory of each process; -max_alloc below caps each single allocation.
     """
@@ -48,7 +55,7 @@ class ProcessRunner:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
-                env={"PATH": os.environ.get("PATH", os.defpath)},
+                env={"PATH": os.environ.get("PATH", os.defpath), **SINGLE_THREADED_LIBRARIES},
             )
         except OSError as e:
             raise ToolUnavailable(command[0]) from e
@@ -88,7 +95,8 @@ class VideoFrames:
             return list(frames.values())
 
     async def _duration(self, source: Path) -> float:
-        args = [self._ffprobe, "-v", "error", *INPUT_GUARD, "-select_streams", "v:0", "-show_entries", PROBE_ENTRIES]
+        args = [self._ffprobe, "-v", "error", *INPUT_GUARD, *SINGLE_THREAD_INPUT]
+        args += ["-select_streams", "v:0", "-show_entries", PROBE_ENTRIES]
         args += ["-of", "default=noprint_wrappers=1"]
         code, stdout = await self._runner.run([*args, str(source)])
         if code != 0:
@@ -107,8 +115,9 @@ class VideoFrames:
 
     async def _frame(self, source: Path, position: str) -> bytes | None:
         output = source.with_name(f"frame-{position}.jpg")
-        args = [self._ffmpeg, "-v", "error", "-y", *INPUT_GUARD, "-ss", position, "-i", str(source)]
-        args += ["-frames:v", "1", "-an", "-vf", f"scale='min({MAX_FRAME_WIDTH},iw)':-2", "-q:v", "3"]
+        args = [self._ffmpeg, "-v", "error", "-y", *INPUT_GUARD, *SINGLE_THREAD_INPUT]
+        args += ["-ss", position, "-i", str(source), "-frames:v", "1", "-an"]
+        args += ["-vf", f"scale='min({MAX_FRAME_WIDTH},iw)':-2", "-q:v", "3", *SINGLE_THREAD_OUTPUT]
         code, _ = await self._runner.run([*args, "-f", "image2", "-c:v", "mjpeg", str(output)])
         # Past the last frame, ffmpeg 5 exits 0 without writing anything and ffmpeg 7 exits with an error.
         if code != 0 or not output.is_file():

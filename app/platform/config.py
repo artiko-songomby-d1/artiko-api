@@ -86,8 +86,9 @@ class Settings(BaseSettings):
     # POST /works per user and for everyone, per minute, while Sightengine checks spend the free quota.
     works_rate_limit_per_minute: int = Field(10, ge=1)
     works_global_rate_limit_per_minute: int = Field(30, ge=1)
-    # prlimit --data cap of each ffprobe and ffmpeg process, in MiB.
-    ai_detection_ffmpeg_memory_mb: int = Field(1024, ge=1)
+    # prlimit --data cap of each ffprobe and ffmpeg process, in MiB: the measured need of a noisy 4K MP4 (202 MiB with
+    # Debian 13's ffmpeg 7.1) plus a margin.
+    ai_detection_ffmpeg_memory_mb: int = Field(272, ge=1)
 
     @field_validator("sightengine_user", "sightengine_secret", mode="before")
     @classmethod
