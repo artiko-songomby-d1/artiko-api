@@ -23,6 +23,7 @@ if not _test_url:
 os.environ["DATABASE_URL"] = _test_url
 os.environ["DB_POOL"] = "false"
 os.environ["EMBED_PROVIDER"] = "none"
+os.environ["AI_DETECTION_PROVIDER"] = "none"
 os.environ["PROOF_URL_SECRET"] = "test-secret-not-for-production"
 os.environ["NONCE_SECRET"] = "test-nonce-secret-not-for-production"
 os.environ["ATTESTATION_PROVIDER"] = "none"

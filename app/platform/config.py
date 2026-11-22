@@ -1,10 +1,13 @@
 from functools import lru_cache
+from typing import Literal, Self
 
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Validation errors name the variable, never its value: a start-up log must not print a secret.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # Neon connection string, from .env. No default: the app refuses to start without a database.
     database_url: str
@@ -69,6 +72,24 @@ class Settings(BaseSettings):
     device_global_rate_limit_per_minute: int = 200
     # "clip" runs the ONNX model; "none" gives a deterministic stand-in vector (tests, no model).
     embed_provider: str = "clip"
+    # "sightengine" asks Sightengine's genai model whether an undeclared work's main file is AI-generated;
+    # "none" checks nothing (tests, local development).
+    ai_detection_provider: Literal["none", "sightengine"] = "none"
+    sightengine_user: str = ""
+    sightengine_secret: SecretStr = SecretStr("")
+    # A main file whose AI score (the highest frame score of a video) reaches this is refused.
+    ai_detection_threshold: float = 0.8
+    # Longest wait for a turn at Sightengine (1 request per second on the free plan) before the file is accepted.
+    ai_detection_wait_seconds: float = 30
+
+    @model_validator(mode="after")
+    def _ai_detection_has_credentials(self) -> Self:
+        if self.ai_detection_provider == "sightengine":
+            if not self.sightengine_user:
+                raise ValueError("SIGHTENGINE_USER is required when AI_DETECTION_PROVIDER=sightengine")
+            if not self.sightengine_secret.get_secret_value():
+                raise ValueError("SIGHTENGINE_SECRET is required when AI_DETECTION_PROVIDER=sightengine")
+        return self
 
     @property
     def async_database_url(self) -> str:
