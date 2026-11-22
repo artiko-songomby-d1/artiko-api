@@ -115,15 +115,15 @@ def bilevel_png(width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
-@pytest.mark.parametrize("size", [(8000, 5001), (13500, 13500)])
-def test_an_image_over_40_m_pixels_is_accepted_without_a_copy(size, monkeypatch, caplog):
+@pytest.mark.parametrize("size", [(5000, 4001), (13500, 13500)])
+def test_an_image_over_20_m_pixels_is_accepted_without_a_copy(size, monkeypatch, caplog):
     monkeypatch.setattr(ai_detection, "MAX_IMAGE_BYTES", 100)
     monkeypatch.setattr(Image.Image, "convert", lambda *a, **k: pytest.fail("the image was decoded"))
     fake = FakeSightengine(0.99)
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
         asyncio.run(detector(fake).check_main_file(bilevel_png(*size), "image", ".png", ai_declared=False))
     assert fake.requests == []
-    assert caplog.messages == ["AI detection skipped (image file): over 40000000 pixels"]
+    assert caplog.messages == ["AI detection skipped (image file): over 20000000 pixels"]
 
 
 def test_the_pixel_cap_is_inclusive(monkeypatch):

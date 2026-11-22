@@ -28,9 +28,9 @@ MAX_IMAGE_BYTES = 12 * 1024 * 1024
 SHRINK_FACTOR = 0.75
 MAX_SHRINK_STEPS = 6
 SHRINK_JPEG_QUALITY = 85
-# Pillow holds 4 bytes a pixel, for the decoded image, its RGB copy and each resize: 40 M pixels peaked at about
-# 510 MB above the process baseline (measured with Pillow 13, 2026-11-22).
-MAX_SHRINK_PIXELS = 40_000_000
+# Pillow holds 4 bytes a pixel, for the decoded image, its RGB copy and each resize: 20 M pixels peak at about
+# 254 MiB above the process baseline, 40 M at about 507 MiB (measured with Pillow 13, 2026-11-22).
+MAX_SHRINK_PIXELS = 20_000_000
 VIDEO_CHECK_SECONDS = 60
 IMAGE_CONTENT_TYPES = {ext: mime for mime, (kind, ext) in storage.TYPES.items() if kind == "image"}
 FILE_FIELD = {"field": "file"}
