@@ -49,11 +49,14 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
     `develop` d'artiko-web (`src/lib/auth.ts`, `requireEmailVerification: true`), pas encore sur son `main`.
   - Reste : le réglage vaut `false` par défaut, car le web ne vérifie pas encore les emails à
     l'inscription : l'activer maintenant bloquerait tous les votes. → L'activer en prod (et l'ajouter à
-    `render.yaml`) quand la PR web des comptes vérifiés est fusionnée. Non vérifié sur un vrai jeton
-    Better Auth : le nom du claim vient de la PR #18 (`feat/verified-email-tokens`, passée en brouillon),
-    qui va plus loin en refusant tout jeton non vérifié ; à reprendre après le déploiement du web, en
-    l'adaptant à #29 (les deux touchent `auth.py`).
-- [ ] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé dans la PR #27, en revue.*
+    `render.yaml`) quand la PR web des comptes vérifiés est fusionnée.
+  - Claim vérifié dans le code de `better-auth@1.7.27` (version du lockfile web) : sans `definePayload`, le
+    jeton contient tout l'objet user (`dist/plugins/jwt/sign.mjs`), dont `emailVerified`, booléen
+    obligatoire que le client ne peut pas écrire (`@better-auth/core`, `dist/db/get-tables.mjs`).
+  - PR #18 (refus de toute requête d'un compte non vérifié) fermée : une fois la vérification d'e-mail du
+    web en prod, un compte non vérifié ne peut plus se connecter ni obtenir de jeton API. La branche
+    `feat/verified-email-tokens` est conservée.
+- [x] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé (PR #27, mergée).*
   - Constat : artiko-web (`src/lib/auth.ts`) n'active que les plugins `jwt`, `bearer`,
     `breachedPasswordCheck` et `nextCookies`, sans champ `role` : le JWT n'a jamais de claim `role`, donc
     personne n'était reviewer (et personne ne pouvait s'attribuer le rôle).
@@ -62,9 +65,9 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
 
 ## 🟠 Bugs
 
-- [ ] **16. Les cas de revue n'ont aucun endpoint** : `ReviewCase` est créé (`review/service.py:9`) mais
+- [x] **16. Les cas de revue n'ont aucun endpoint** : `ReviewCase` est créé (`review/service.py:9`) mais
   aucun routeur `review` n'est monté (`main.py:23`). Une œuvre signalée « possible copy » reste bloquée,
-  sans recours. → *Corrigé dans la PR #27, en revue.*
+  sans recours. → *Corrigé (PR #27, mergée).*
   - `GET /review/cases` (paginé, filtre `status`) et `POST /review/cases/{id}/decision`
     (`cleared` | `confirmed`), réservés aux reviewers ; un reviewer ne tranche pas son propre cas
     (403 `own_case`).
@@ -133,6 +136,6 @@ tiennent. À traiter après la démo.
 
 ## Ordre suggéré
 
-Merger #27 (9 et 16) puis #29 (8). Ensuite : la confirmation du 3 en prod, l'activation du vote réservé aux
-e-mails vérifiés dès que le web vérifie les e-mails en prod, et la fin du 1 quand l'app Android capture des
-preuves signées.
+#27 et #29 sont mergées. Reste : la confirmation du 3 en prod, l'activation du vote réservé aux e-mails
+vérifiés dès que le web vérifie les e-mails en prod, et la fin du 1 quand l'app Android capture des preuves
+signées.
