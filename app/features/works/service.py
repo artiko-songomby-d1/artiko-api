@@ -65,17 +65,17 @@ async def publish_work(
     checked = []
     for i, p in enumerate(proof):
         p_data = await storage.read_upload(p)
-        ext = storage.kind_of(p, p_data)[1]
+        proof_ext = storage.kind_of(p, p_data)[1]
         claim = proof_claims[i] if proof_claims else None
-        checked.append((p_data, ext, await verify_proof(db, user.id, storage.sha256(p_data), claim)))
+        checked.append((p_data, proof_ext, await verify_proof(db, user.id, storage.sha256(p_data), claim)))
     proofs = []
     now = datetime.now(UTC)
-    for i, (p_data, ext, evidence) in enumerate(checked):
+    for i, (p_data, proof_ext, evidence) in enumerate(checked):
         captured = evidence.captured_at_ms
         # Spaced by a microsecond so the proofs keep the order they were sent in.
         proofs.append(
             WorkProof(
-                path=storage.save(p_data, ext, private=proof_visibility != PUBLIC),
+                path=storage.save(p_data, proof_ext, private=proof_visibility != PUBLIC),
                 visibility=proof_visibility,
                 created_at=now + timedelta(microseconds=i),
                 source=evidence.source,
