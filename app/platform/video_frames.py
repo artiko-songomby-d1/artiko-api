@@ -33,7 +33,7 @@ class ProcessTimedOut(Exception):
 
 
 class UnreadableVideo(Exception):
-    """The file has no readable video stream, no positive duration, or no frame."""
+    """ffprobe rejects the file, or finds no video stream or no positive duration in it."""
 
 
 class ProcessRunner:
@@ -80,7 +80,8 @@ class VideoFrames:
     async def extract(self, video: bytes) -> list[bytes]:
         """One JPEG at 30, 50 and 70 % of the duration, the first frame for a position that has none, each once.
 
-        Raises UnreadableVideo when the file itself is at fault; ToolUnavailable or ProcessTimedOut when a tool is.
+        Empty when ffmpeg gives no frame at all, which a memory cap hit looks like as much as a broken file does.
+        Raises UnreadableVideo when ffprobe finds the file at fault; ToolUnavailable or ProcessTimedOut when a tool is.
         The private directory holding the file is removed in every case.
         """
         with tempfile.TemporaryDirectory(prefix="artiko-video-") as workdir:  # created with mode 0700
@@ -90,8 +91,6 @@ class VideoFrames:
             frames: dict[str, bytes] = {}
             for share in FRAME_SHARES:
                 await self._add_frame(source, f"{duration * share:.3f}", frames)
-            if not frames:
-                raise UnreadableVideo("no frame")
             return list(frames.values())
 
     async def _duration(self, source: Path) -> float:

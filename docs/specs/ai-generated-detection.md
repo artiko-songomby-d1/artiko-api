@@ -67,7 +67,7 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 - **AC26 (bounded waits).** Given a video check, then the wait for a video slot counts inside the 60 s deadline; when it expires the work is accepted unchecked with a WARNING.
 - **AC27 (memory).** Given an image over 12 MB, then a copy is built only when `width x height` is at most 20,000,000 pixels (above it: accepted unchecked with a WARNING) and at most one such copy is built at a time. Given ffmpeg and ffprobe, then the `prlimit --data` cap is configurable (`AI_DETECTION_FFMPEG_MEMORY_MB`) and its default is the smallest value with which the 1080p and the noisy 3840x2160 MP4 test files both give 3 frames, plus a margin of at least 64 MiB, and never above 512: **272 MiB** (measured values under Technical constraints). This fits a 512 MB instance (Render free plan; the RAM figure is unverified).
 - **AC28 (settings validation).** Given the settings, then the app refuses to start (naming the variable) when `AI_DETECTION_THRESHOLD` is not a finite number in (0, 1], `AI_DETECTION_WAIT_SECONDS` is negative, a limit or the video slot count is below 1, or a Sightengine credential is empty after trimming spaces.
-- **AC29 (timeouts accept).** Given ffprobe or ffmpeg killed by its 30 s timeout, then the work is accepted unchecked with a WARNING, not refused as `unreadable_video`. A file that ffprobe rejects quickly (non-zero exit), has no video stream or has no duration stays a 400 `unreadable_video` (AC11).
+- **AC29 (timeouts and missing frames accept).** Given ffprobe or ffmpeg killed by its 30 s timeout, then the work is accepted unchecked with a WARNING, not refused as `unreadable_video`. Given a video that ffprobe reads (a video stream and a positive duration) but from which ffmpeg extracts no frame at any position (for example `Cannot allocate memory` under the AC27 cap), then the work is accepted unchecked with a WARNING (`ffmpeg extracted no frame`, no file content), not refused. Given fewer than 3 frames extracted and at least one scored, then the decision uses the scored frames and a WARNING gives the frame count. A file that ffprobe rejects quickly (non-zero exit), has no video stream or has no duration stays a 400 `unreadable_video` (AC11); it is the only video refused as unreadable.
 - **AC30 (limiter fairness).** Given a request cancelled while waiting for its turn (client disconnect), then its slot is released and does not delay later requests.
 
 ## Out of scope
@@ -96,6 +96,8 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 | Two publishes at the same time | The limiter serializes requests (AC18); the second may wait up to 30 s, then is accepted unchecked. |
 | Client disconnects during a video check | The check stops and the temporary directory is removed (AC14). Nothing is stored. |
 | 4K MP4 | Frames are scaled to 1280 px wide, so every frame stays small. |
+| MP4 that ffprobe reads but ffmpeg cannot cut (memory cap hit, decoder error) | Accepted unchecked with a WARNING (AC29). A file built to exhaust ffmpeg's memory therefore skips the check (fail-open, by decision). |
+| MP4 that gives only 1 or 2 frames | Checked on those frames; a WARNING gives the count (AC29). |
 | Refusal after the file was read | Nothing was stored yet (AC5, AC19). |
 
 ## Technical constraints
@@ -154,7 +156,7 @@ Unit tests use `httpx.MockTransport`: no test calls the network. `tests/conftest
 | AC26 | `test_the_wait_for_a_video_slot_counts_in_the_deadline`, `test_video_check_stops_at_its_deadline`, `test_one_detector_serves_one_event_loop_after_another` |
 | AC27 | `test_an_image_over_20_m_pixels_is_accepted_without_a_copy`, `test_the_pixel_cap_is_inclusive`, `test_one_shrunk_copy_is_built_at_a_time`, `test_three_frames_fit_under_the_default_memory_cap` (1080p and noisy 4K) |
 | AC28 | `test_startup_refuses_invalid_ai_detection_settings`, `test_credentials_are_trimmed_and_edge_values_are_accepted` |
-| AC29 | `test_a_tool_killed_at_its_timeout_accepts_the_video`, `test_a_probe_that_fails_quickly_refuses_the_video` |
+| AC29 | `test_a_tool_killed_at_its_timeout_accepts_the_video`, `test_a_probe_that_fails_quickly_refuses_the_video`, `test_a_probed_video_ffmpeg_cannot_cut_is_accepted_unchecked`, `test_a_video_with_fewer_than_three_frames_is_checked_with_a_warning`, `test_a_probed_video_without_any_frame_gives_an_empty_list`, `test_frames_found_at_some_positions_only_are_kept` |
 | AC30 | `test_a_waiter_cancelled_before_its_turn_releases_its_slot`, `test_a_slot_freed_between_two_taken_ones_is_reused` |
 
 Also: `tests/test_architecture.py` still passes; `task lint` clean. The suite uses the local database `artiko_test` (`TEST_DATABASE_URL=postgresql://artiko:artiko@127.0.0.1:5432/artiko_test`); no migration mentions pgvector.

@@ -16,7 +16,7 @@ from app.platform.config import Settings
 from app.platform.errors import BadRequest
 from app.platform.video_frames import VideoFrames
 from tests.sightengine_fakes import FakeSightengine, failure
-from tests.videos import ffmpeg_runner, mp4
+from tests.videos import FrameStarvedRunner, ffmpeg_runner, mp4
 
 DATABASE_URL = "postgresql://artiko:artiko@127.0.0.1:5432/artiko_test"
 VIDEO = mp4(seconds=2, size="320x240")
@@ -202,6 +202,30 @@ def test_a_probe_that_fails_quickly_refuses_the_video(tmp_path):
     assert error.value.code == "unreadable_video"
 
 
+def test_a_probed_video_ffmpeg_cannot_cut_is_accepted_unchecked(caplog):
+    fake = FakeSightengine(0.99)
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        asyncio.run(detector(fake, VideoFrames(FrameStarvedRunner())).check_main_file(VIDEO, "video", ".mp4", False))
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "AI detection skipped (video file): ffmpeg extracted no frame")
+    ]
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize(("score", "refused"), [(0.99, True), (0.1, False)])
+def test_a_video_with_fewer_than_three_frames_is_checked_with_a_warning(score, refused, caplog):
+    fake = FakeSightengine(score)
+    frames = VideoFrames(FrameStarvedRunner(frozenset({"1.000"})))
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        if refused:
+            with pytest.raises(BadRequest):
+                asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False))
+        else:
+            asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", False))
+    assert caplog.messages == ["AI detection partial (video file): 1 of 3 frames extracted"]
+    assert len(fake.requests) == 1
+
+
 class BlockedFrames:
     """Frame extraction that waits until released, counting the checks that reached it."""
 
@@ -249,7 +273,10 @@ def test_the_wait_for_a_video_slot_counts_in_the_deadline(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
         waited = asyncio.run(second_check_waits_behind_a_stuck_one())
     assert waited < 0.4 and frames.entered == 1
-    assert caplog.messages == ["AI detection stopped (video file): over 0 s"]
+    assert caplog.messages == [
+        "AI detection stopped (video file): over 0 s",
+        "AI detection skipped (video file): ffmpeg extracted no frame",
+    ]
 
 
 def test_one_detector_serves_one_event_loop_after_another():

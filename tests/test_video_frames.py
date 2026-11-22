@@ -18,7 +18,7 @@ from app.platform.video_frames import (
     UnreadableVideo,
     VideoFrames,
 )
-from tests.videos import mp4
+from tests.videos import FrameStarvedRunner, mp4
 
 
 class SpyRunner(ProcessRunner):
@@ -97,6 +97,15 @@ def test_short_video_falls_back_to_the_first_frame():
     assert len(frames) == 1
     positions = [c[c.index("-ss") + 1] for c in runner.commands if "-ss" in c]
     assert positions == ["0.300", "0.000", "0.500", "0.700"]
+
+
+def test_a_probed_video_without_any_frame_gives_an_empty_list():
+    assert asyncio.run(VideoFrames(FrameStarvedRunner()).extract(b"probed")) == []
+
+
+def test_frames_found_at_some_positions_only_are_kept():
+    frames = asyncio.run(VideoFrames(FrameStarvedRunner(frozenset({"1.000"}))).extract(b"probed"))
+    assert len(frames) == 1 and b"frame-1.000.jpg" in frames[0]
 
 
 @pytest.mark.parametrize(

@@ -1,11 +1,14 @@
 """Tiny real videos built with the local ffmpeg."""
 
+import asyncio
 import subprocess
 import tempfile
 from pathlib import Path
 
 from app.platform.config import get_settings
 from app.platform.video_frames import PROCESS_TIMEOUT_SECONDS, ProcessRunner
+
+PROBED_VIDEO = b"codec_type=video\nDISPOSITION:attached_pic=0\nduration=2.000000\n"
 
 
 def ffmpeg_runner(timeout_seconds: float = PROCESS_TIMEOUT_SECONDS) -> ProcessRunner:
@@ -39,3 +42,19 @@ def audio_only_mp4() -> bytes:
         args = ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac", str(out)]
         subprocess.run(args, check=True, timeout=60)  # noqa: S603 S607 fixed arguments, ffmpeg found on PATH
         return out.read_bytes()
+
+
+class FrameStarvedRunner(ProcessRunner):
+    """ffprobe reads a 2 s video, ffmpeg exits with an error (as when it hits the memory cap) except at `framed`."""
+
+    def __init__(self, framed: frozenset[str] = frozenset()):
+        super().__init__(memory_limit_mb=1024)
+        self.framed = framed
+
+    async def run(self, args: list[str]) -> tuple[int, bytes]:
+        if args[0] == "ffprobe":
+            return 0, PROBED_VIDEO
+        if args[args.index("-ss") + 1] not in self.framed:
+            return 1, b""
+        await asyncio.to_thread(Path(args[-1]).write_bytes, b"\xff\xd8 a frame " + args[-1].encode())
+        return 0, b""

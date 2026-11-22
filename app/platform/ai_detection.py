@@ -1,8 +1,8 @@
 """Refuses an undeclared work whose main file Sightengine's genai model finds AI-generated.
 
 Only the main image, or three frames of the main MP4, ever leave the process. Every failure of the provider or of
-ffmpeg accepts the file (fail-open); only a score at or above the threshold, or a video that cannot be checked
-because of the file itself, refuses it.
+ffmpeg accepts the file (fail-open); only a score at or above the threshold, or a video that ffprobe finds
+unreadable, refuses it.
 """
 
 import asyncio
@@ -19,7 +19,14 @@ from app.platform import storage
 from app.platform.config import get_settings
 from app.platform.errors import BadRequest
 from app.platform.sightengine import REQUEST_SPACING_SECONDS, Credentials, RequestSpacer, Sightengine
-from app.platform.video_frames import ProcessRunner, ProcessTimedOut, ToolUnavailable, UnreadableVideo, VideoFrames
+from app.platform.video_frames import (
+    FRAME_SHARES,
+    ProcessRunner,
+    ProcessTimedOut,
+    ToolUnavailable,
+    UnreadableVideo,
+    VideoFrames,
+)
 
 log = logging.getLogger("artiko.ai_detection")
 
@@ -116,10 +123,16 @@ class AiDetector:
 
     async def _score_frames(self, sightengine: Sightengine, data: bytes, scores: list[float]) -> None:
         """Appends each score as it comes, so the frames checked before a timeout still count."""
-        for frame in await self._frames.extract(data):
+        frames = await self._frames.extract(data)
+        if not frames:
+            log.warning("AI detection skipped (video file): ffmpeg extracted no frame")
+            return
+        for frame in frames:
             score = await sightengine.ai_generated_score(frame, "image/jpeg", "video")
             if score is not None:
                 scores.append(score)
+        if scores and len(frames) < len(FRAME_SHARES):
+            log.warning("AI detection partial (video file): %d of %d frames extracted", len(frames), len(FRAME_SHARES))
 
 
 class TooManyPixels(Exception):
