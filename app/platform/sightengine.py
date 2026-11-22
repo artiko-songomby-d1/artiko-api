@@ -4,7 +4,9 @@ Every failure is logged once with the kind of file and an error code, never a cr
 """
 
 import asyncio
+import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -17,6 +19,9 @@ CHECK_URL = "https://api.sightengine.com/1.0/check.json"
 REQUEST_TIMEOUT_SECONDS = 30
 # The free plan accepts 1 request per second; the margin absorbs network jitter.
 REQUEST_SPACING_SECONDS = 1.1
+# A genai answer is a few hundred bytes; anything far larger is not one.
+MAX_ANSWER_BYTES = 1024 * 1024
+LOGGABLE_CODE = re.compile(r"[A-Za-z0-9]{1,20}")
 
 
 class RequestSpacer:
@@ -63,38 +68,59 @@ class Sightengine:
         """The genai score (0 to 1) of an image cut from a file of this kind, or None when Sightengine gave none."""
         if not await self._spacer.wait_turn(self._max_wait):
             return _unavailable(kind, "wait_limit")
+        media = {"media": ("media", image, content_type)}
         try:
             # httpx times each phase (connect, write, read) apart: the outer timeout caps the whole call.
             async with (
                 asyncio.timeout(REQUEST_TIMEOUT_SECONDS),
                 httpx.AsyncClient(transport=self._transport, timeout=REQUEST_TIMEOUT_SECONDS) as http,
+                http.stream("POST", CHECK_URL, data=self._form(), files=media) as response,
             ):
-                media = {"media": ("media", image, content_type)}
-                response = await http.post(CHECK_URL, data=self._form(), files=media)
+                status, answer = response.status_code, await _capped_answer(response)
         except (httpx.HTTPError, TimeoutError) as e:
             # The class name only: the message of an httpx error can quote the request.
             return _unavailable(kind, type(e).__name__)
-        return _score(response, kind)
+        if answer is None:
+            return _unavailable(kind, f"http_{status}_too_large")
+        return _score(status, answer, kind)
 
     def _form(self) -> dict[str, str]:
         return {"models": "genai", "api_user": self._credentials.user, "api_secret": self._credentials.secret}
 
 
-def _score(response: httpx.Response, kind: str) -> float | None:
+async def _capped_answer(response: httpx.Response) -> bytes | None:
+    """The body, or None as soon as it passes MAX_ANSWER_BYTES: the rest is never read."""
+    answer = bytearray()
+    async for chunk in response.aiter_bytes():
+        answer += chunk
+        if len(answer) > MAX_ANSWER_BYTES:
+            return None
+    return bytes(answer)
+
+
+def _score(status: int, answer: bytes, kind: str) -> float | None:
     try:
-        body = response.json()
-    except ValueError:
-        return _unavailable(kind, f"http_{response.status_code}_not_json")
+        body = json.loads(answer)
+    except (ValueError, RecursionError):
+        return _unavailable(kind, f"http_{status}_not_json")
     if not isinstance(body, dict):
-        return _unavailable(kind, f"http_{response.status_code}_unexpected_body")
+        return _unavailable(kind, f"http_{status}_unexpected_body")
     error = body.get("error")
     if body.get("status") == "failure" and isinstance(error, dict):
-        return _unavailable(kind, f"sightengine_{error.get('code')}")
+        return _unavailable(kind, f"sightengine_{_loggable_code(error.get('code'))}")
     result = body.get("type")
     score = result.get("ai_generated") if isinstance(result, dict) else None
-    if response.status_code != 200 or body.get("status") != "success" or not _is_probability(score):
-        return _unavailable(kind, f"http_{response.status_code}_unexpected_body")
+    if status != 200 or body.get("status") != "success" or not _is_probability(score):
+        return _unavailable(kind, f"http_{status}_unexpected_body")
     return float(score)
+
+
+def _loggable_code(code: object) -> str:
+    """The upstream error code when it is short and plain, so an answer can never write into the logs."""
+    text = str(code) if isinstance(code, int) and not isinstance(code, bool) else code
+    if isinstance(text, str) and LOGGABLE_CODE.fullmatch(text):
+        return text
+    return "unknown"
 
 
 def _is_probability(value: object) -> bool:

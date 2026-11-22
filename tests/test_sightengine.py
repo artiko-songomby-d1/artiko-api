@@ -1,12 +1,13 @@
 import asyncio
 import itertools
+import json
 import logging
 import time
 
 import httpx
 import pytest
 
-from app.platform.sightengine import Credentials, RequestSpacer, Sightengine
+from app.platform.sightengine import MAX_ANSWER_BYTES, Credentials, RequestSpacer, Sightengine
 from tests.sightengine_fakes import TEST_SECRET, TEST_USER, FakeSightengine, failure
 
 FAILURES = {
@@ -104,3 +105,92 @@ def test_concurrent_requests_start_spaced_in_arrival_order():
     assert [n for n, _ in started] == [0, 1, 2]
     # asyncio may wake a sleeper up to its clock resolution early.
     assert all(later - earlier >= 0.045 for (_, earlier), (_, later) in itertools.pairwise(started))
+
+
+def deep_json(depth: int = 100_000) -> bytes:
+    return b"[" * depth + b"]" * depth
+
+
+HOSTILE_ANSWERS = {
+    "deeply nested": (httpx.Response(200, content=deep_json()), "http_200_not_json"),
+    "integer too long to parse": (
+        httpx.Response(200, content=b'{"status":"success","type":{"ai_generated":' + b"9" * 5000 + b"}}"),
+        "http_200_not_json",
+    ),
+    "list": (httpx.Response(200, json=[1, 2]), "http_200_unexpected_body"),
+    "null": (httpx.Response(200, content=b"null"), "http_200_unexpected_body"),
+    "NaN score": (
+        httpx.Response(200, content=b'{"status":"success","type":{"ai_generated":NaN}}'),
+        "http_200_unexpected_body",
+    ),
+    "infinite score": (
+        httpx.Response(200, content=b'{"status":"success","type":{"ai_generated":1e999}}'),
+        "http_200_unexpected_body",
+    ),
+    "score as text": (
+        httpx.Response(200, json={"status": "success", "type": {"ai_generated": "0.99"}}),
+        "http_200_unexpected_body",
+    ),
+    "error as text": (httpx.Response(200, json={"status": "failure", "error": "x"}), "http_200_unexpected_body"),
+    "type as list": (httpx.Response(200, json={"status": "success", "type": [0.99]}), "http_200_unexpected_body"),
+    "score from a 5xx": (
+        httpx.Response(503, json={"status": "success", "type": {"ai_generated": 0.99}}),
+        "http_503_unexpected_body",
+    ),
+}
+
+
+@pytest.mark.parametrize("name", HOSTILE_ANSWERS)
+def test_a_hostile_answer_is_fail_open(name, caplog):
+    response, code = HOSTILE_ANSWERS[name]
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        score = asyncio.run(FakeSightengine(response).client().ai_generated_score(b"jpeg", "image/jpeg", "image"))
+    assert score is None
+    assert caplog.messages == [f"AI detection skipped (image file): {code}"]
+
+
+def test_an_answer_over_1_mib_is_not_read_to_the_end(caplog):
+    chunks_read = 0
+
+    async def endless_body():
+        nonlocal chunks_read
+        while chunks_read < 1000:
+            chunks_read += 1
+            yield b"x" * 65536
+
+    fake = FakeSightengine(httpx.Response(200, content=endless_body()))
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        assert asyncio.run(fake.client().ai_generated_score(b"jpeg", "image/jpeg", "image")) is None
+    assert chunks_read == MAX_ANSWER_BYTES // 65536 + 1 == 17
+    assert caplog.messages == ["AI detection skipped (image file): http_200_too_large"]
+
+
+def test_an_answer_of_exactly_1_mib_is_read():
+    padding = MAX_ANSWER_BYTES - len(json.dumps({"status": "success", "type": {"ai_generated": 0.5}, "p": ""}))
+    body = json.dumps({"status": "success", "type": {"ai_generated": 0.5}, "p": " " * padding}).encode()
+    assert len(body) == MAX_ANSWER_BYTES
+    fake = FakeSightengine(httpx.Response(200, content=body))
+    assert asyncio.run(fake.client().ai_generated_score(b"jpeg", "image/jpeg", "image")) == 0.5
+
+
+@pytest.mark.parametrize(
+    ("code", "logged"),
+    [
+        (32, "32"),
+        ("E3701x", "E3701x"),
+        ("A" * 20, "A" * 20),
+        ("A" * 21, "unknown"),
+        ("\nERROR forged line", "unknown"),
+        ("usage_limit", "unknown"),
+        (True, "unknown"),
+        (10**25, "unknown"),
+        (None, "unknown"),
+        ({"nested": 1}, "unknown"),
+    ],
+)
+def test_only_a_short_plain_error_code_is_logged(code, logged, caplog):
+    body = {"status": "failure", "error": {"type": "media_error", "code": code}}
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        fake = FakeSightengine(httpx.Response(200, json=body))
+        assert asyncio.run(fake.client().ai_generated_score(b"jpeg", "image/jpeg", "image")) is None
+    assert caplog.messages == [f"AI detection skipped (image file): sightengine_{logged}"]
