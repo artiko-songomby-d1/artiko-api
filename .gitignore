@@ -9,3 +9,4 @@ __pycache__/
 /models/
 tests/.media/
 requirements-audit.txt
+gitleaks/
