@@ -53,6 +53,9 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
   à plusieurs œuvres pendant 10 min.
 - [ ] **8. Vote sans email vérifié** : `CurrentUser` ne lit aucun claim `email_verified` (`auth.py:89`) ;
   avec l'inscription libre côté web, comptes jetables = votes multiples.
+  → En cours : PR #18 (`feat/verified-email-tokens`, ouverte, non mergée) refuse les jetons dont le claim
+  `emailVerified` n'est pas `true`. Elle part d'un ancien `develop` : à rebaser, conflit attendu avec le
+  point 22 dans `auth.py`.
 - [ ] **9. Rôle `reviewer` lu depuis le JWT** (`auth.py:69`) alors que le web n'active pas de plugin de
   rôles Better Auth (non vérifié) : soit le rôle est inatteignable, soit il faut garantir qu'aucun
   utilisateur ne peut l'écrire lui-même.
