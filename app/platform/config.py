@@ -1,11 +1,13 @@
 from functools import lru_cache
+from typing import Literal, Self
 
-from pydantic import NonNegativeInt, PositiveInt
+from pydantic import Field, NonNegativeInt, PositiveInt, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Validation errors name the variable, never its value: a start-up log must not print a secret.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # Neon connection string, from .env. No default: the app refuses to start without a database.
     database_url: str
@@ -29,7 +31,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     # Public base URL of this API, used to build absolute media links for the apps.
     public_api_url: str = "http://localhost:8000"
-    max_upload_mb: int = 20
+    max_upload_mb: int = 60
     # Megapixels of a picture that may be decoded at full size, checked on its header before a pixel is decoded: a
     # few hundred kilobytes can announce gigabytes of pixels. Decoding takes 6 MB a megapixel and one picture is
     # decoded at a time, so 17 cost about 100 MB, on top of the 330 MB the API takes with the CLIP model loaded
@@ -111,6 +113,37 @@ class Settings(BaseSettings):
     device_global_rate_limit_per_minute: int = 200
     # "clip" runs the ONNX model; "none" gives a deterministic stand-in vector (tests, no model).
     embed_provider: str = "clip"
+    # "sightengine" asks Sightengine's genai model whether an undeclared work's main file is AI-generated;
+    # "none" checks nothing (tests, local development).
+    ai_detection_provider: Literal["none", "sightengine"] = "none"
+    sightengine_user: str = ""
+    sightengine_secret: SecretStr = SecretStr("")
+    # A main file whose AI score (the highest frame score of a video) reaches this is refused.
+    ai_detection_threshold: float = Field(0.8, gt=0, le=1, allow_inf_nan=False)
+    # Longest wait for a turn at Sightengine (1 request per second on the free plan) before the file is accepted.
+    ai_detection_wait_seconds: float = Field(30, ge=0, allow_inf_nan=False)
+    # Video checks running at once: each runs ffmpeg, the largest memory user of a check; the others wait.
+    ai_detection_max_video_checks: int = Field(1, ge=1)
+    # POST /works per user and for everyone, per minute, while Sightengine checks spend the free quota.
+    works_rate_limit_per_minute: int = Field(10, ge=1)
+    works_global_rate_limit_per_minute: int = Field(30, ge=1)
+    # prlimit --data cap of each ffprobe and ffmpeg process, in MiB: the measured need of a noisy 4K MP4 (202 MiB with
+    # Debian 13's ffmpeg 7.1) plus a margin.
+    ai_detection_ffmpeg_memory_mb: int = Field(272, ge=1)
+
+    @field_validator("sightengine_user", "sightengine_secret", mode="before")
+    @classmethod
+    def _trimmed(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _ai_detection_has_credentials(self) -> Self:
+        if self.ai_detection_provider == "sightengine":
+            if not self.sightengine_user:
+                raise ValueError("SIGHTENGINE_USER is required when AI_DETECTION_PROVIDER=sightengine")
+            if not self.sightengine_secret.get_secret_value():
+                raise ValueError("SIGHTENGINE_SECRET is required when AI_DETECTION_PROVIDER=sightengine")
+        return self
 
     @property
     def async_database_url(self) -> str:

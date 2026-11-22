@@ -188,13 +188,20 @@ paths:
         it as a copy, and an artist with 20 open cases gets the latest one instead of a new one); once a reviewer clears
         the case, the artist may publish that exact file, unless a case for it was confirmed. One that looks like the
         artist's own earlier work is accepted and the two works share a `series_id`.
-        Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
+        Files: up to 60 MB each (`MAX_UPLOAD_MB`); images (jpeg, png, webp), audio (mpeg, wav, ogg),
         video (mp4, webm), 3D (glb). Each part must be sent with the content type its bytes really are
         (`unsupported_file`, 400, otherwise: a PNG sent as `image/jpeg` is refused). A picture with too many
         pixels is refused with 413 `image_too_large`: over 89 megapixels for a JPEG (14.4 when progressive),
         17 for a PNG (12.7 when transparent), 6 for a WebP (5.1 when transparent).
         Each user may publish 10 times a minute, refused attempts included; past that the API answers 429 with
         a `Retry-After` header.
+        When AI detection is on and `ai_declared` is false, the main image, or 3 frames of the main MP4, are sent
+        to Sightengine before anything is stored; a file it finds AI-generated is refused with 400
+        `ai_generated_content`. Audio, 3D files, posters and proof files are never sent. When Sightengine cannot
+        answer, the work is accepted. While AI detection is on, each user may send 10 works a minute to the
+        check and all users together 30; past that the API answers 429 with a `Retry-After` header. Only a publish
+        that reaches Sightengine counts: one refused before the check, or never checked, costs nothing. This limit
+        does not protect the daily Sightengine quota: once it is spent, works are accepted unchecked.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -255,7 +262,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Work" }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400":
+          description: |
+            The request breaks a rule; `error.code` says which. AI detection adds three codes, each with
+            `field: "file"` and never a score: `ai_generated_content` (the main file looks AI-generated; publish it
+            again with `ai_declared` true if it is), `unsupported_video_format` (a WebM main file that needs a
+            check: only MP4 videos are accepted), `unreadable_video` (an MP4 with no readable video stream or no
+            duration).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -687,6 +701,7 @@ components:
             code: { type: string, examples: [already_voted] }
             message: { type: string }
             case_id: { type: string, format: uuid, description: "Review case of a refused publication (`possible_copy`)" }
+            field: { type: string, examples: [file], description: "The form field the error is about (`ai_generated_content`, `unsupported_video_format`, `unreadable_video`)" }
 
     Month:
       type: string

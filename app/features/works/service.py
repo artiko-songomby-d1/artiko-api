@@ -15,6 +15,7 @@ from app.features.works.checks import Candidate, ProofClaim, notify_image_publis
 from app.features.works.models import Exposition, Work, WorkProof
 from app.features.works.proofs import PUBLIC, REVIEWERS
 from app.platform import storage
+from app.platform.ai_detection import AiDetector, CheckBudget
 from app.platform.auth import CurrentUser
 from app.platform.config import get_settings
 from app.platform.db import Db
@@ -42,6 +43,8 @@ async def publish_work(
     proof_claims: list[ProofClaim | None] | None = None,
     model_hd: UploadFile | None = None,
     poster: UploadFile | None = None,
+    ai_detector: AiDetector,
+    check_budget: CheckBudget,
 ) -> Work:
     artist = await db.scalar(select(Artist).where(Artist.user_id == user.id))
     if artist is None:
@@ -52,6 +55,8 @@ async def publish_work(
         raise BadRequest("invalid_exposition", "Choose one of your own expositions")
     if len(proof) > MAX_PROOFS:
         raise BadRequest("too_many_proofs", f"At most {MAX_PROOFS} proof files")
+    if proof_claims and len(proof_claims) != len(proof):
+        raise BadRequest("invalid_proof_claims", "Send one claim for each proof file, in the same order")
 
     data = await storage.read_upload(file)
     # Decoding, hashing and storing a file of several megabytes all block: they run in a worker thread, so that
@@ -61,12 +66,12 @@ async def publish_work(
     fingerprint = await run_in_threadpool(storage.sha256, data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
         raise Conflict("duplicate_work", "This exact file is already published on Artiko")
-    # Hashed before it is embedded: a picture that cannot be decoded is refused here, with a 400.
+    # Hashed before it is embedded: a picture that cannot be decoded is refused here, with a 400, before any
+    # Sightengine check spends the budget.
     image_hash = await _image_hash(file, data) if kind == "image" else None
+    await ai_detector.check_main_file(data, kind, ext, ai_declared, requester=user.id, budget=check_budget)
     embedding = (await run_in_threadpool(embed, data)).tolist() if kind == "image" else None
     earlier = await run_publish_checks(db, Candidate(artist.id, fingerprint, kind, embedding, image_hash))
-    if proof_claims and len(proof_claims) != len(proof):
-        raise BadRequest("invalid_proof_claims", "Send one claim for each proof file, in the same order")
     checked = []
     prints = []
     for i, p in enumerate(proof):

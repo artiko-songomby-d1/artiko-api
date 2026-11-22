@@ -23,6 +23,7 @@ if not _test_url:
 os.environ["DATABASE_URL"] = _test_url
 os.environ["DB_POOL"] = "false"
 os.environ["EMBED_PROVIDER"] = "none"
+os.environ["AI_DETECTION_PROVIDER"] = "none"
 os.environ["PROOF_URL_SECRET"] = "test-secret-not-for-production"
 os.environ["NONCE_SECRET"] = "test-nonce-secret-not-for-production"
 os.environ["ATTESTATION_PROVIDER"] = "none"
@@ -83,8 +84,9 @@ def _clean_db():
     from app.features.me.router import artist_limiter
     from app.features.votes.router import limiter as vote_limiter
     from app.features.works.router import work_limiter
+    from app.platform.ai_detection import check_limiter
 
-    for write_limiter in (work_limiter, vote_limiter, artist_limiter, exposition_limiter):
+    for write_limiter in (work_limiter, vote_limiter, artist_limiter, exposition_limiter, check_limiter):
         write_limiter.reset()
     yield
 

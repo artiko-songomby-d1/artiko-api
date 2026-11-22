@@ -5,6 +5,10 @@ FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916
 
 COPY --from=uv /uv /bin/uv
 WORKDIR /app
+# ffmpeg and ffprobe cut the frames of MP4 videos for AI-generated detection; prlimit comes with util-linux.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_NO_DEV=1 PATH="/app/.venv/bin:$PATH"
 
 # Dependencies first, so code changes do not reinstall them.

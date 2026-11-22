@@ -33,6 +33,14 @@ services:
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
+      - key: MAX_UPLOAD_MB
+        value: "60"
+      - key: AI_DETECTION_PROVIDER
+        sync: false
+      - key: SIGHTENGINE_USER
+        sync: false
+      - key: SIGHTENGINE_SECRET
+        sync: false
       # Added after the service was created. Render ignores a new `sync: false` entry on an existing
       # Blueprint, so these use `value` (applied at the next sync, and wins over a dashboard edit) or
       # `generateValue` (created once if the variable does not exist yet, then kept).

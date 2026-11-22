@@ -156,6 +156,35 @@ def user_key(user: User) -> str:
     return f"user:{user.id}"
 
 
+async def admit(
+    limiter: SlidingWindowLimiter,
+    shared: RedisSlidingWindowLimiter | None,
+    bucket: str,
+    client: str,
+    per_client: int,
+    overall: int,
+) -> None:
+    """Counts the request, or raises 429 once `client`, or all clients together, pass their per-minute caps.
+
+    With RATE_LIMIT_REDIS_URL set, the counters are shared through `shared`; otherwise they live in `limiter`.
+    """
+    if get_settings().rate_limit_redis_url:
+        if shared is None:
+            raise ServiceUnavailable("rate_limit_unavailable", "Request limits are temporarily unavailable")
+        wait = await shared.check(bucket, client, per_client, overall)
+    else:
+        # Both checks and records run without yielding to another request.
+        now = time.monotonic()
+        # Count a request in both buckets only when both allow it: a client stuck at its own limit must
+        # not use up the global budget and lock everyone else out.
+        wait = limiter.wait_for(client, per_client, now) or limiter.wait_for(GLOBAL_KEY, overall, now)
+        if wait is None:
+            limiter.record(client, now)
+            limiter.record(GLOBAL_KEY, now)
+    if wait is not None:
+        raise TooManyRequests("rate_limited", "Too many requests, try again shortly", retry_after=wait)
+
+
 def limit_per_minute(
     bucket: str,
     limiter: SlidingWindowLimiter,
@@ -168,19 +197,7 @@ def limit_per_minute(
     `key` names the client: its address by default, `user_key` on routes that require a token."""
 
     async def check(request: Request, client: Annotated[str, Depends(key)]) -> None:
-        if get_settings().rate_limit_redis_url:
-            shared = getattr(request.app.state, "rate_limiter", None)
-            if shared is None:
-                raise ServiceUnavailable("rate_limit_unavailable", "Request limits are temporarily unavailable")
-            wait = await shared.check(bucket, client, per_client(), overall())
-        else:
-            # Both checks and records run without yielding to another request.
-            now = time.monotonic()
-            wait = limiter.wait_for(client, per_client(), now) or limiter.wait_for(GLOBAL_KEY, overall(), now)
-            if wait is None:
-                limiter.record(client, now)
-                limiter.record(GLOBAL_KEY, now)
-        if wait is not None:
-            raise TooManyRequests("rate_limited", "Too many requests, try again shortly", retry_after=wait)
+        shared = getattr(request.app.state, "rate_limiter", None)
+        await admit(limiter, shared, bucket, client, per_client(), overall())
 
     return Depends(check)
