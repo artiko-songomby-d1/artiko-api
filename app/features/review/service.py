@@ -2,9 +2,9 @@
 
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, func, select, update
 
-from app.features.review.models import CLEARED, OPEN, ReviewCase
+from app.features.review.models import CLEARED, CONFIRMED, OPEN, ReviewCase
 from app.platform.db import Db
 from app.platform.errors import Conflict, NotFound
 from app.platform.pagination import Page
@@ -22,15 +22,12 @@ async def open_possible_copy(
     score: float,
     signal: str,
 ) -> ReviewCase:
-    """The open case for this artist and file, or a new one: retrying a refused file does not pile up cases."""
+    """The confirmed or open case for this artist and file, or a new one: retrying a refused file does not pile up
+    cases, and a confirmed copy never gets a fresh case a reviewer could clear."""
     existing = await db.scalar(
         select(ReviewCase)
-        .where(
-            ReviewCase.reason == POSSIBLE_COPY,
-            ReviewCase.artist_id == artist_id,
-            ReviewCase.candidate_sha256 == candidate_sha256,
-            ReviewCase.status == OPEN,
-        )
+        .where(*_same_file(artist_id, candidate_sha256), ReviewCase.status.in_((CONFIRMED, OPEN)))
+        .order_by(ReviewCase.status == OPEN)
         .limit(1)
     )
     if existing is not None:
@@ -50,18 +47,23 @@ async def open_possible_copy(
 
 
 async def is_cleared(db: Db, *, artist_id: uuid.UUID, candidate_sha256: str) -> bool:
-    """Whether a reviewer cleared this exact file of this artist as a possible copy."""
-    cleared = await db.scalar(
-        select(ReviewCase.id)
-        .where(
-            ReviewCase.reason == POSSIBLE_COPY,
-            ReviewCase.artist_id == artist_id,
-            ReviewCase.candidate_sha256 == candidate_sha256,
-            ReviewCase.status == CLEARED,
+    """Whether a reviewer cleared this exact file of this artist as a possible copy and none confirmed it."""
+    statuses = set(
+        await db.scalars(
+            select(ReviewCase.status)
+            .where(*_same_file(artist_id, candidate_sha256), ReviewCase.status.in_((CLEARED, CONFIRMED)))
+            .distinct()
         )
-        .limit(1)
     )
-    return cleared is not None
+    return statuses == {CLEARED}
+
+
+def _same_file(artist_id: uuid.UUID, candidate_sha256: str) -> tuple[ColumnElement[bool], ...]:
+    return (
+        ReviewCase.reason == POSSIBLE_COPY,
+        ReviewCase.artist_id == artist_id,
+        ReviewCase.candidate_sha256 == candidate_sha256,
+    )
 
 
 async def list_cases(db: Db, status: str, page: Page) -> list[ReviewCase]:

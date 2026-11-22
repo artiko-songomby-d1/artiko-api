@@ -1,3 +1,6 @@
+from sqlalchemy import create_engine, text
+
+from app.platform.config import get_settings
 from tests.conftest import REVIEWER, auth, become_artist, make_token
 from tests.test_copy_detection import art, count, encode, post_work
 
@@ -15,6 +18,13 @@ def refuse_copy(client, user_id: str = "bob", size: int = 128) -> tuple[bytes, s
     refused = post_work(client, user_id, copy)
     assert refused.status_code == 409, refused.text
     return copy, refused.json()["error"]["case_id"]
+
+
+def execute(sql: str) -> None:
+    engine = create_engine(get_settings().async_database_url)
+    with engine.begin() as conn:
+        conn.execute(text(sql))
+    engine.dispose()
 
 
 def decide(client, case_id: str, decision: str, headers: dict[str, str]):
@@ -77,6 +87,26 @@ def test_a_confirmed_copy_stays_refused(client, reviewer):
     copy, case_id = refuse_copy(client)
     decided = decide(client, case_id, "confirmed", reviewer)
     assert decided.status_code == 200 and decided.json()["status"] == "confirmed"
+    assert post_work(client, "bob", copy).status_code == 409
+
+
+def test_resending_a_confirmed_copy_reuses_its_case(client, reviewer):
+    copy, case_id = refuse_copy(client)
+    assert decide(client, case_id, "confirmed", reviewer).status_code == 200
+    again = post_work(client, "bob", copy)
+    assert again.status_code == 409 and again.json()["error"]["case_id"] == case_id
+    assert count("SELECT count(*) FROM app.review_case") == 1
+    assert client.get(CASES, headers=reviewer).json() == []
+
+
+def test_a_confirmed_case_outweighs_a_cleared_one(client, reviewer):
+    copy, case_id = refuse_copy(client)
+    assert decide(client, case_id, "confirmed", reviewer).status_code == 200
+    execute(
+        "INSERT INTO app.review_case (id, reason, status, artist_id, candidate_sha256, other_work_id, score, signal)"
+        " SELECT gen_random_uuid(), reason, 'cleared', artist_id, candidate_sha256, other_work_id, score, signal"
+        " FROM app.review_case"
+    )
     assert post_work(client, "bob", copy).status_code == 409
 
 

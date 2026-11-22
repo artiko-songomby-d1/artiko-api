@@ -171,8 +171,9 @@ paths:
         proofs counted (same SHA-256, or for images the same picture resized or recompressed, do not count
         twice); such a file is still stored. The same file (SHA-256) cannot be published twice. An image that looks like another
         artist's work or a known work (CLIP similarity or perceptual hash) is refused with 409 `possible_copy`
-        and the id of the review case (retrying the same file returns the same open case); once a reviewer
-        clears the case, the artist may publish that exact file. One that looks like the artist's own earlier work is accepted and the two
+        and the id of the review case (retrying the same file returns the same open case, or the confirmed one once a reviewer confirmed
+        it as a copy); once a reviewer clears the case, the artist may publish that exact file, unless a case for it
+        was confirmed. One that looks like the artist's own earlier work is accepted and the two
         works share a `series_id`.
         Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
         video (mp4, webm), 3D (glb).
