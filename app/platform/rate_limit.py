@@ -1,20 +1,20 @@
-"""Per-client request limits for expensive endpoints.
-
-Counts live in this process's memory, so with N instances the real limit is N times higher.
-That is enough to stop one client from hammering a single instance; shared limits would need Redis.
-A client that rotates addresses can still dodge its own limit, which is why an endpoint also
-gets a global limit that no rotation can get around.
-"""
+"""Per-client and global sliding-window request limits for expensive endpoints."""
 
 import ipaddress
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
+from hashlib import sha256
+from uuid import uuid4
 
 from fastapi import Depends, Request
+from redis.asyncio import Redis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
+from redis.exceptions import RedisError
 
 from app.platform.config import get_settings
-from app.platform.errors import TooManyRequests
+from app.platform.errors import ServiceUnavailable, TooManyRequests
 
 WINDOW_SECONDS = 60
 # Hard cap on tracked clients: past it the least recently seen one is dropped, so memory stays bounded
@@ -23,6 +23,31 @@ MAX_TRACKED_CLIENTS = 10_000
 # A home or mobile network hands one subscriber a whole /64: all its addresses count as one client.
 IPV6_PREFIX = 64
 GLOBAL_KEY = "*"
+
+# One Redis operation admits against both buckets using the shared server clock.
+_REDIS_CHECK = """
+local stamp = redis.call("TIME")
+local now = tonumber(stamp[1]) * 1000000 + tonumber(stamp[2])
+local seconds = tonumber(ARGV[1])
+local cutoff = now - seconds * 1000000
+
+for i, key in ipairs(KEYS) do
+    redis.call("ZREMRANGEBYSCORE", key, "-inf", cutoff)
+    if redis.call("ZCARD", key) >= tonumber(ARGV[i + 1]) then
+        local oldest = redis.call("ZRANGE", key, 0, 0, "WITHSCORES")
+        if #oldest == 0 then
+            return seconds
+        end
+        return math.floor((tonumber(oldest[2]) - cutoff) / 1000000) + 1
+    end
+end
+
+for _, key in ipairs(KEYS) do
+    redis.call("ZADD", key, now, ARGV[4])
+    redis.call("EXPIRE", key, seconds)
+end
+return 0
+"""
 
 
 class SlidingWindowLimiter:
@@ -57,6 +82,32 @@ class SlidingWindowLimiter:
 
     def reset(self) -> None:
         self.hits.clear()
+
+
+class RedisSlidingWindowLimiter:
+    def __init__(self, url: str) -> None:
+        self.redis = Redis.from_url(url, socket_connect_timeout=2, socket_timeout=2, retry=Retry(NoBackoff(), 0))
+
+    async def check(self, bucket: str, client: str, per_client: int, overall: int) -> int | None:
+        prefix = f"artiko:rate-limit:{{{bucket}}}"
+        client_id = sha256(client.encode()).hexdigest()
+        try:
+            wait = await self.redis.eval(
+                _REDIS_CHECK,
+                2,
+                f"{prefix}:client:{client_id}",
+                f"{prefix}:global",
+                WINDOW_SECONDS,
+                per_client,
+                overall,
+                uuid4().hex,
+            )
+        except RedisError:
+            raise ServiceUnavailable("rate_limit_unavailable", "Request limits are temporarily unavailable") from None
+        return wait or None
+
+    async def aclose(self) -> None:
+        await self.redis.aclose()
 
 
 def normalise(address: str) -> str:
@@ -98,19 +149,25 @@ def client_key(request: Request) -> str:
 
 
 def limit_per_minute(
-    limiter: SlidingWindowLimiter, per_client: Callable[[], int], overall: Callable[[], int]
+    bucket: str, limiter: SlidingWindowLimiter, per_client: Callable[[], int], overall: Callable[[], int]
 ) -> Callable:
     """A dependency that answers 429 once one client, or all clients together, pass their per-minute caps."""
 
-    # async on purpose: it runs on the event loop with no await, so the limiter is never touched by two threads.
     async def check(request: Request) -> None:
-        client, now = client_key(request), time.monotonic()
-        # Count a request in both buckets only when both allow it: a client stuck at its own limit must
-        # not use up the global budget and lock everyone else out.
-        wait = limiter.wait_for(client, per_client(), now) or limiter.wait_for(GLOBAL_KEY, overall(), now)
+        client = client_key(request)
+        if get_settings().rate_limit_redis_url:
+            shared = getattr(request.app.state, "rate_limiter", None)
+            if shared is None:
+                raise ServiceUnavailable("rate_limit_unavailable", "Request limits are temporarily unavailable")
+            wait = await shared.check(bucket, client, per_client(), overall())
+        else:
+            # Both checks and records run without yielding to another request.
+            now = time.monotonic()
+            wait = limiter.wait_for(client, per_client(), now) or limiter.wait_for(GLOBAL_KEY, overall(), now)
+            if wait is None:
+                limiter.record(client, now)
+                limiter.record(GLOBAL_KEY, now)
         if wait is not None:
             raise TooManyRequests("rate_limited", "Too many requests, try again shortly", retry_after=wait)
-        limiter.record(client, now)
-        limiter.record(GLOBAL_KEY, now)
 
     return Depends(check)

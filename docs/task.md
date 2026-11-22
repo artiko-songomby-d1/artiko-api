@@ -63,22 +63,23 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 
 ## 🟡 Architecture / dette
 
-- [ ] **18. Détection pHash en scan complet** : chaque publication charge le pHash de toutes les œuvres
-  et compare en Python (`integrity/service.py:49`). → Requête SQL / index dès que le volume grandit,
-  comme prévu pour CLIP (`scan/index.py:3`).
-- [ ] **19. `refresh` de l'index à chaque scan** (`scan/service.py:27`) : 2 requêtes DB par scan sous
-  verrou global ; un TTL suffirait.
-- [ ] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` renvoient tout, avec
-  les preuves.
-- [ ] **21. CORS `allow_credentials=True`** (`main.py:32`) alors que l'API n'utilise que des bearer
-  tokens : inutile, à retirer.
-- [ ] **22. Détail de l'erreur JWT renvoyé au client** (`auth.py:88`, `f"Invalid token: {e}"`) : à garder
-  dans les logs.
-- [ ] **23. Rate limit en mémoire par processus** (`rate_limit.py:3`, assumé) : partager les compteurs
-  (Redis) si plusieurs instances.
-- [ ] **24. Dépendances déclarées mais non importées** : `celery`, `redis`, `sse-starlette`, `pyacoustid`
-  et `pgvector` n'apparaissent dans aucun import de `app/` ni `scripts/` (`grep`). Les retirer allège
-  l'image et la surface d'attaque.
+- [x] **18. Détection pHash en scan complet** : PostgreSQL calcule la distance exacte et renvoie
+  les meilleures correspondances par groupe. Quatre index filtrent les candidats pour les seuils
+  jusqu'à 11 bits, dont le seuil par défaut de 8. Les seuils supérieurs gardent le calcul SQL exact.
+- [x] **19. `refresh` de l'index à chaque scan** : délai par processus configurable via
+  `SCAN_INDEX_REFRESH_SECONDS` (15 s par défaut). Une publication invalide l'index local après validation
+  de la transaction. Le contrôle des doublons continue d'actualiser l'index avant la comparaison.
+- [x] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` utilisent
+  `limit` et `offset`. Le musée charge les preuves et calcule la salle pour les œuvres de la page.
+- [x] **21. CORS `allow_credentials=True`** : option retirée. Les origines configurées peuvent
+  toujours envoyer l'en-tête `Authorization` pour l'authentification bearer.
+- [x] **22. Détail de l'erreur JWT renvoyé au client** : réponse 401 générique. Le type d'erreur est
+  journalisé au niveau debug sans le jeton, les claims ou le détail fourni par le client.
+- [x] **23. Rate limit en mémoire par processus** : les instances partagent les compteurs lorsque
+  `RATE_LIMIT_REDIS_URL` est configurée. Sans cette variable, les compteurs restent locaux au processus.
+- [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `redis`, `sse-starlette`,
+  `pyacoustid` et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`. Le point 23 réintroduit
+  `redis` pour les compteurs partagés.
 
 ## Ordre suggéré
 

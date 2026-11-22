@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.features.artists.models import Artist
-from app.features.works.checks import Candidate, ProofClaim, run_publish_checks, verify_proof
+from app.features.works.checks import Candidate, ProofClaim, notify_image_published, run_publish_checks, verify_proof
 from app.features.works.models import Exposition, Work, WorkProof
 from app.features.works.proofs import PUBLIC, REVIEWERS
 from app.platform import storage
@@ -125,6 +125,8 @@ async def publish_work(
         await db.commit()
     except IntegrityError as e:  # the same file published at the same instant
         raise Conflict("duplicate_work", "This exact file is already published on Artiko") from e
+    if embedding is not None:
+        notify_image_published()
     return work
 
 

@@ -21,11 +21,14 @@ def test_me_with_token(client):
     assert r.json()["id"] == "alice"
 
 
-def test_expired_token_rejected(client):
+def test_expired_token_rejected(client, caplog):
     token = make_token("alice", exp=int(time.time()) - 10)
-    r = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    with caplog.at_level("DEBUG", logger="app.platform.auth"):
+        r = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401
-    assert r.json()["error"]["code"] == "invalid_token"
+    assert r.json() == {"error": {"code": "invalid_token", "message": "Invalid token"}}
+    assert "JWT validation failed (ExpiredSignatureError)" in caplog.messages
+    assert token not in caplog.text
 
 
 def test_unknown_key_rejected(client):

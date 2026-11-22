@@ -30,6 +30,7 @@ os.environ["ALLOW_IMPORTED_PROOFS_FOR_BADGE"] = "false"  # tests enforce the str
 os.environ["MEDIA_DIR"] = str(Path(__file__).parent / ".media")
 # A developer's .env may name the real bucket: tests always use local disk.
 os.environ["MEDIA_BUCKET"] = ""
+os.environ["RATE_LIMIT_REDIS_URL"] = ""
 
 import jwt
 import pytest
