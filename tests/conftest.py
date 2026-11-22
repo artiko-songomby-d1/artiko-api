@@ -31,6 +31,7 @@ os.environ["MEDIA_DIR"] = str(Path(__file__).parent / ".media")
 # A developer's .env may name the real bucket: tests always use local disk.
 os.environ["MEDIA_BUCKET"] = ""
 os.environ["RATE_LIMIT_REDIS_URL"] = ""
+os.environ["REVIEWER_USER_IDS"] = ""  # reviewers are granted per test, never from a developer's .env
 
 import jwt
 import pytest
@@ -95,6 +96,16 @@ def make_token(user_id: str, **claims) -> str:
 
 def auth(user_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {make_token(user_id)}"}
+
+
+REVIEWER = "rev"
+
+
+@pytest.fixture
+def reviewer(monkeypatch) -> dict[str, str]:
+    """Headers of a user the API designates as reviewer through REVIEWER_USER_IDS."""
+    monkeypatch.setattr(get_settings(), "reviewer_user_ids", REVIEWER)
+    return auth(REVIEWER)
 
 
 @pytest.fixture

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     auth_issuer: str = "http://localhost:3000"
     auth_audience: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
+    # Comma-separated Better Auth user ids allowed to review. Empty = nobody.
+    reviewer_user_ids: str = ""
 
     media_dir: str = "media"
     # S3-compatible bucket for uploads (Neon Object Storage). Empty = files stay on local disk in MEDIA_DIR.
@@ -83,6 +85,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def reviewer_user_id_set(self) -> frozenset[str]:
+        return frozenset(i.strip() for i in self.reviewer_user_ids.split(",") if i.strip())
 
 
 @lru_cache

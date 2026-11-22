@@ -67,12 +67,9 @@ class CurrentUser:
     id: str
     email: str | None
     name: str | None
-    # Better Auth role claim: "reviewer" may open private proofs and work the review queue.
-    role: str | None = None
-
-    @property
-    def is_reviewer(self) -> bool:
-        return self.role == "reviewer"
+    # Reviewers may open private proofs and work the review queue. The API designates them (REVIEWER_USER_IDS):
+    # Better Auth issues no role claim, so a claim in the token is never trusted.
+    is_reviewer: bool = False
 
 
 async def decode_token(token: str) -> CurrentUser:
@@ -90,7 +87,12 @@ async def decode_token(token: str) -> CurrentUser:
         # Exception messages may contain token-controlled data, such as the signing key ID.
         log.debug("JWT validation failed (%s)", type(error).__name__)
         raise Unauthorized("invalid_token", "Invalid token") from error
-    return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"), role=claims.get("role"))
+    return CurrentUser(
+        id=claims["sub"],
+        email=claims.get("email"),
+        name=claims.get("name"),
+        is_reviewer=claims["sub"] in s.reviewer_user_id_set,
+    )
 
 
 async def current_user(
