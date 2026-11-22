@@ -70,6 +70,9 @@ class CurrentUser:
     # Reviewers may open private proofs and work the review queue. The API designates them (REVIEWER_USER_IDS):
     # Better Auth issues no role claim, so a claim in the token is never trusted.
     is_reviewer: bool = False
+    # Better Auth copies the user into the token, `emailVerified` included. False when the claim is missing:
+    # a token that says nothing about the email proves nothing about it.
+    email_verified: bool = False
 
 
 async def decode_token(token: str) -> CurrentUser:
@@ -92,6 +95,8 @@ async def decode_token(token: str) -> CurrentUser:
         email=claims.get("email"),
         name=claims.get("name"),
         is_reviewer=claims["sub"] in s.reviewer_user_id_set,
+        # Only the boolean true counts: the string "true" or 1 could come from a field a user controls.
+        email_verified=claims.get("emailVerified") is True,
     )
 
 

@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # POST /votes, per user: a voter has 8 votes a month (one per category), so 30 tries a minute is far above use.
     vote_rate_limit_per_minute: int = 30
     vote_global_rate_limit_per_minute: int = 600
+    # Only accounts whose email is verified may vote: one vote per person means little when anybody can open
+    # ten accounts with made-up addresses. Off until the web app verifies emails at sign-up; turning it on
+    # before that would stop every vote, since no account would be verified.
+    require_verified_email_to_vote: bool = False
     # PUT /me/artist, per user: a profile is edited a few times in a row at most.
     artist_rate_limit_per_minute: int = 10
     artist_global_rate_limit_per_minute: int = 120
