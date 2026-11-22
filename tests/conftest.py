@@ -26,6 +26,7 @@ os.environ["EMBED_PROVIDER"] = "none"
 os.environ["PROOF_URL_SECRET"] = "test-secret-not-for-production"
 os.environ["NONCE_SECRET"] = "test-nonce-secret-not-for-production"
 os.environ["ATTESTATION_PROVIDER"] = "none"
+os.environ["ATTESTATION_REVOCATION_URL"] = ""  # Google's revocation list is never fetched in tests
 os.environ["ALLOW_IMPORTED_PROOFS_FOR_BADGE"] = "false"  # tests enforce the strict rule
 os.environ["MEDIA_DIR"] = str(Path(__file__).parent / ".media")
 # A developer's .env may name the real bucket: tests always use local disk.
@@ -45,6 +46,7 @@ from app.platform import auth as security
 from app.platform import registry  # noqa: F401  registers every table
 from app.platform.config import get_settings
 from app.platform.db import Base
+from app.platform.nonces import issue as issue_nonce
 
 _key = Ed25519PrivateKey.generate()
 
@@ -77,6 +79,13 @@ def _clean_db():
 
     device_limiter.reset()
     proof_limiter.reset()
+    from app.features.expositions.router import limiter as exposition_limiter
+    from app.features.me.router import artist_limiter
+    from app.features.votes.router import limiter as vote_limiter
+    from app.features.works.router import work_limiter
+
+    for write_limiter in (work_limiter, vote_limiter, artist_limiter, exposition_limiter):
+        write_limiter.reset()
     yield
 
 
@@ -174,10 +183,14 @@ def register_device(client, user_id: str) -> tuple[str, ec.EllipticCurvePrivateK
 
 
 def signed_claim(device_id: str, key, data: bytes, draft_id: str = "draft-1", nonce: str | None = None, **over) -> dict:
-    """The claim a phone sends for a capture it signed with its key."""
+    """The claim a phone sends for a capture it signed with its key. Without `nonce`, the phone uses a fresh
+    challenge of the device's owner, as the app does."""
+    if nonce is None:
+        owner = next(user for (_, user), (known, _) in _devices.items() if known == device_id)
+        nonce = issue_nonce(owner)[0]
     sha = hashlib.sha256(data).hexdigest()
     at_ms = over.pop("captured_at_ms", int(time.time() * 1000))
-    signature = key.sign(f"{sha}|{at_ms}|{draft_id}|{nonce or ''}".encode(), ec.ECDSA(hashes.SHA256()))
+    signature = key.sign(f"{sha}|{at_ms}|{draft_id}|{nonce}".encode(), ec.ECDSA(hashes.SHA256()))
     return {
         "source": "in_app",
         "device_id": device_id,

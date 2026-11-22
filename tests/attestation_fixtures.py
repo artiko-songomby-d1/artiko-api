@@ -39,21 +39,55 @@ def _name(common: str) -> x509.Name:
     return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common)])
 
 
-def make_root() -> tuple[x509.Certificate, ec.EllipticCurvePrivateKey]:
-    key = ec.generate_private_key(ec.SECP256R1())
+def make_ca(
+    issuer: x509.Certificate | None = None,
+    issuer_key: ec.EllipticCurvePrivateKey | None = None,
+    *,
+    common: str = "Test attestation intermediate",
+    key: ec.EllipticCurvePrivateKey | None = None,
+    ca: bool | None = True,
+    path_length: int | None = None,
+    key_cert_sign: bool | None = None,
+    extension: x509.UnrecognizedExtension | None = None,
+    expired: bool = False,
+) -> tuple[x509.Certificate, ec.EllipticCurvePrivateKey]:
+    """A certificate whose key signs others: self-signed without an issuer, an intermediate with one.
+
+    The defaults make a proper CA. `ca=None` leaves BasicConstraints out, `key_cert_sign` adds a KeyUsage that
+    grants or withholds the right to sign certificates, `extension` adds one more extension (an attestation, say).
+    """
+    key = key or ec.generate_private_key(ec.SECP256R1())
     now = dt.datetime.now(dt.UTC)
-    cert = (
+    day = dt.timedelta(days=1)
+    start, end = (now - 30 * day, now - day) if expired else (now - day, now + 30 * day)
+    builder = (
         x509.CertificateBuilder()
-        .subject_name(_name("Test attestation root"))
-        .issuer_name(_name("Test attestation root"))
+        .subject_name(_name(common))
+        .issuer_name(issuer.subject if issuer else _name(common))
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(now - dt.timedelta(days=1))
-        .not_valid_after(now + dt.timedelta(days=30))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .sign(key, hashes.SHA256())
+        .not_valid_before(start)
+        .not_valid_after(end)
     )
-    return cert, key
+    if ca is not None:
+        builder = builder.add_extension(x509.BasicConstraints(ca=ca, path_length=path_length), critical=True)
+    if key_cert_sign is not None:
+        usage = dict.fromkeys(
+            ("content_commitment", "key_encipherment", "data_encipherment", "key_agreement", "crl_sign"), False
+        )
+        builder = builder.add_extension(
+            x509.KeyUsage(
+                digital_signature=True, key_cert_sign=key_cert_sign, encipher_only=False, decipher_only=False, **usage
+            ),
+            critical=True,
+        )
+    if extension is not None:
+        builder = builder.add_extension(extension, critical=False)
+    return builder.sign(issuer_key or key, hashes.SHA256()), key
+
+
+def make_root() -> tuple[x509.Certificate, ec.EllipticCurvePrivateKey]:
+    return make_ca(common="Test attestation root")
 
 
 def make_leaf(

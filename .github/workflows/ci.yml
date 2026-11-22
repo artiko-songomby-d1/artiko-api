@@ -1,7 +1,9 @@
 name: CI
+# Actions are pinned to a full commit SHA (a tag can be moved to other code); the trailing comment is the
+# version, which Dependabot reads and bumps together with the SHA.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 jobs:
   gitleaks:
@@ -9,7 +11,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -25,6 +27,8 @@ jobs:
           "$RUNNER_TEMP/gitleaks" git --redact=100 --verbose .
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # A throwaway Postgres for the tests; dev and production use Neon.
     services:
       postgres:
@@ -39,8 +43,10 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://artiko:artiko@localhost:5432/artiko_test
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -53,6 +59,10 @@ jobs:
   docker:
     # The image Render runs: dependencies, code and the CLIP model must all build.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: docker build -t artiko-api .

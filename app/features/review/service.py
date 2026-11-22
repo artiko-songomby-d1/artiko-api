@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.features.artists.models import Artist
 from app.features.review.models import CLEARED, CONFIRMED, OPEN, ReviewCase
+from app.platform.config import get_settings
 from app.platform.db import Db
 from app.platform.errors import Conflict, Forbidden, NotFound
 from app.platform.pagination import Page
@@ -25,11 +26,25 @@ async def open_possible_copy(
     score: float,
     signal: str,
 ) -> ReviewCase:
-    """The confirmed or open case for this artist and file, or a new one: retrying a refused file does not pile up
-    cases, and a confirmed copy never gets a fresh case a reviewer could clear."""
+    """The confirmed or open case for this artist and file, or a new one only when it tells the reviewers something
+    new: retrying a refused file does not pile up cases, a confirmed copy never gets a fresh case a reviewer could
+    clear, and one account cannot fill the table by sending copies again and again."""
     existing = await _existing_case(db, artist_id, candidate_sha256, ReviewCase.status.in_((CONFIRMED, OPEN)))
     if existing is not None:
         return existing
+    # One changed byte is another SHA-256, so the number of open cases per artist is capped too: past the cap
+    # the caller gets the latest one. Two requests at the same instant can still each add a row.
+    cap = get_settings().review_max_open_cases_per_artist
+    latest = (
+        await db.scalars(
+            select(ReviewCase)
+            .where(ReviewCase.reason == POSSIBLE_COPY, ReviewCase.status == OPEN, ReviewCase.artist_id == artist_id)
+            .order_by(ReviewCase.created_at.desc())
+            .limit(cap)
+        )
+    ).all()
+    if len(latest) >= cap:
+        return latest[0]
     # The partial unique index allows one open case per artist and file: a concurrent refusal of the same file
     # inserts nothing here and its case is read back instead.
     opened = await db.scalar(

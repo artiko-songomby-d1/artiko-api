@@ -50,6 +50,14 @@ class PayloadTooLarge(ApiError):
     status = 413
 
 
+class RangeNotSatisfiable(ApiError):
+    status = 416
+
+    def __init__(self, code: str, message: str, size: int):
+        # RFC 9110: a 416 tells the real length, so the client can ask again inside the file.
+        super().__init__(code, message, {"Content-Range": f"bytes */{size}"})
+
+
 class TooManyRequests(ApiError):
     status = 429
 

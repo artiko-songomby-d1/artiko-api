@@ -96,7 +96,8 @@ def test_a_confirmed_copy_stays_refused(client, reviewer):
     assert post_work(client, "bob", copy).status_code == 409
 
 
-def test_concurrent_refusals_of_one_file_open_a_single_case(client):
+def test_concurrent_refusals_of_one_file_open_a_single_case(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "work_rate_limit_per_minute", 20)
     copy, case_id = refuse_copy(client)
     execute("DELETE FROM app.review_case")
 
