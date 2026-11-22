@@ -27,6 +27,8 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
     encore le badge, donc le droit de vote (`votes/service.py:23`). Les preuves non-image (vidéo…) ne
     sont comparées que par SHA-256 : modifier un octet suffit. → Passer à `false` en prod dès que la
     capture signée de l'app Android est disponible.
+  - Décision du 2026-11-22 : garder `true` en prod pour l'instant. Avec `false`, le web n'envoyant que des
+    preuves importées, plus personne n'obtiendrait le badge ni ne pourrait voter.
 - [ ] **3. Rate limit inefficace derrière Render** — *corrigé, hypothèse à confirmer.*
   - Fait : `render.yaml` déclare `CLIENT_IP_HEADER=CF-Connecting-IP`, `PROOF_URL_SECRET`, `NONCE_SECRET`,
     `ATTESTATION_PROVIDER` et `ALLOW_IMPORTED_PROOFS_FOR_BADGE`. Une valeur d'en-tête qui n'est pas une IP
@@ -35,24 +37,44 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
     `CF-Connecting-IP`, n'est pas documenté par Render (non vérifié, seulement des posts de la communauté).
     → Confirmer en prod, par exemple en envoyant un `CF-Connecting-IP` forgé et en vérifiant qu'il n'est
     pas pris comme clé.
-- [ ] **8. Vote sans email vérifié** — *partiellement corrigé.*
+  - Procédure (à faire par l'équipe, pas automatisée) : envoyer ~21 `POST /api/v1/scan/image` en moins
+    d'une minute, chacun avec un `CF-Connecting-IP` forgé différent. Une réponse 429 avant la fin prouve
+    que l'en-tête forgé est ignoré ; aucune 429 prouve qu'il est pris comme clé (à corriger).
+- [ ] **8. Vote sans email vérifié** — *partiellement corrigé (PR #29).*
   - Fait : `CurrentUser` lit le claim `emailVerified` du jeton (`auth.py`). Avec
     `REQUIRE_VERIFIED_EMAIL_TO_VOTE=true`, `POST /votes` répond 403 `email_not_verified` si l'email du
     votant n'est pas vérifié (`votes/service.py`). Les autres routes ne sont pas concernées.
+  - Décision du 2026-11-22 : d'abord la PR #29 (refus du vote seulement, derrière
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=false` par défaut). La vérification d'e-mail à l'inscription existe sur
+    `develop` d'artiko-web (`src/lib/auth.ts`, `requireEmailVerification: true`), pas encore sur son `main`.
   - Reste : le réglage vaut `false` par défaut, car le web ne vérifie pas encore les emails à
     l'inscription : l'activer maintenant bloquerait tous les votes. → L'activer en prod (et l'ajouter à
     `render.yaml`) quand la PR web des comptes vérifiés est fusionnée. Non vérifié sur un vrai jeton
-    Better Auth : le nom du claim vient de la PR #18 (`feat/verified-email-tokens`, non mergée), qui va
-    plus loin en refusant tout jeton non vérifié ; les deux approches sont à arbitrer.
-- [ ] **9. Rôle `reviewer` lu depuis le JWT** (`auth.py:69`) alors que le web n'active pas de plugin de
-  rôles Better Auth (non vérifié) : soit le rôle est inatteignable, soit il faut garantir qu'aucun
-  utilisateur ne peut l'écrire lui-même.
+    Better Auth : le nom du claim vient de la PR #18 (`feat/verified-email-tokens`, passée en brouillon),
+    qui va plus loin en refusant tout jeton non vérifié ; à reprendre après le déploiement du web, en
+    l'adaptant à #29 (les deux touchent `auth.py`).
+- [ ] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé dans la PR #27, en revue.*
+  - Constat : artiko-web (`src/lib/auth.ts`) n'active que les plugins `jwt`, `bearer`,
+    `breachedPasswordCheck` et `nextCookies`, sans champ `role` : le JWT n'a jamais de claim `role`, donc
+    personne n'était reviewer (et personne ne pouvait s'attribuer le rôle).
+  - Correctif : reviewers désignés côté API par `REVIEWER_USER_IDS` (ids Better Auth, vide = personne) ;
+    le claim `role` n'est plus lu. À renseigner à la main dans le tableau de bord Render (`sync: false`).
 
 ## 🟠 Bugs
 
 - [ ] **16. Les cas de revue n'ont aucun endpoint** : `ReviewCase` est créé (`review/service.py:9`) mais
   aucun routeur `review` n'est monté (`main.py:23`). Une œuvre signalée « possible copy » reste bloquée,
-  sans recours.
+  sans recours. → *Corrigé dans la PR #27, en revue.*
+  - `GET /review/cases` (paginé, filtre `status`) et `POST /review/cases/{id}/decision`
+    (`cleared` | `confirmed`), réservés aux reviewers ; un reviewer ne tranche pas son propre cas
+    (403 `own_case`).
+  - `cleared` laisse le même artiste republier le même fichier (même SHA-256). Un cas `confirmed` est
+    définitif : un renvoi le réutilise et il l'emporte sur un `cleared`.
+  - Un seul cas ouvert par artiste et fichier, même en concurrence (index unique partiel + `ON CONFLICT`).
+    Migration `0017` : supprime d'abord les cas ouverts en double déjà présents.
+  - Pagination : `offset` plafonné à 1 000 000 (422 au-delà, au lieu d'un 500).
+  - Relu deux fois par les trois relecteurs ; suite complète : 281 tests réussis, 2 ignorés.
+  - Reste : relier un cas levé à l'œuvre publiée ensuite ; aucune interface web pour ces routes.
 
 ## 🟡 Architecture / dette
 
@@ -80,5 +102,6 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
 
 ## Ordre suggéré
 
-La fin du 1 (intégrité du concours) et la confirmation du 3 en prod. 8 et 9 demandent une décision côté web
-(comptes à e-mail vérifié, rôle relecteur) ; 16 dépend de 9.
+Merger #27 (9 et 16) puis #29 (8). Ensuite : la confirmation du 3 en prod, l'activation du vote réservé aux
+e-mails vérifiés dès que le web vérifie les e-mails en prod, et la fin du 1 quand l'app Android capture des
+preuves signées.
