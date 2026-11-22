@@ -166,6 +166,10 @@ paths:
         works share a `series_id`.
         Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
         video (mp4, webm), 3D (glb).
+        When AI detection is on and `ai_declared` is false, the main image, or 3 frames of the main MP4, are sent
+        to Sightengine before anything is stored; a file it finds AI-generated is refused with 400
+        `ai_generated_content`. Audio, 3D files, posters and proof files are never sent. When Sightengine cannot
+        answer, the work is accepted.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -221,7 +225,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Work" }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400":
+          description: |
+            The request breaks a rule; `error.code` says which. AI detection adds three codes, each with
+            `field: "file"` and never a score: `ai_generated_content` (the main file looks AI-generated; publish it
+            again with `ai_declared` true if it is), `unsupported_video_format` (a WebM main file that needs a
+            check: only MP4 videos are accepted), `unreadable_video` (an MP4 with no readable video stream or no
+            duration).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -565,6 +576,7 @@ components:
             code: { type: string, examples: [already_voted] }
             message: { type: string }
             case_id: { type: string, format: uuid, description: "Review case opened for a refused publication (`possible_copy`)" }
+            field: { type: string, examples: [file], description: "The form field the error is about (`ai_generated_content`, `unsupported_video_format`, `unreadable_video`)" }
 
     Month:
       type: string
