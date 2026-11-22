@@ -39,6 +39,9 @@ class Work(Base):
     category: Mapped[str] = mapped_column(String(20), index=True)
     media_path: Mapped[str] = mapped_column(String)
     media_kind: Mapped[str] = mapped_column(String(10))
+    # Optional extras of a 3D work: a detailed GLB loaded on demand and a still shown while loading.
+    media_hd_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    poster_path: Mapped[str | None] = mapped_column(String, nullable=True)
     sha256: Mapped[str] = mapped_column(String(64), unique=True)
     ai_declared: Mapped[bool] = mapped_column(Boolean, default=False)
     human_proven: Mapped[bool] = mapped_column(Boolean, default=False)

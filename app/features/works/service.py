@@ -38,6 +38,8 @@ async def publish_work(
     proof: list[UploadFile],
     proof_visibility: str = REVIEWERS,
     proof_claims: list[ProofClaim | None] | None = None,
+    model_hd: UploadFile | None = None,
+    poster: UploadFile | None = None,
 ) -> Work:
     artist = await db.scalar(select(Artist).where(Artist.user_id == user.id))
     if artist is None:
@@ -51,6 +53,7 @@ async def publish_work(
 
     data = await storage.read_upload(file)
     kind, ext = storage.kind_of(file, data)
+    hd, still = await _read_model_extras(kind, model_hd, poster)
     fingerprint = storage.sha256(data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
         raise Conflict("duplicate_work", "This exact file is already published on Artiko")
@@ -62,17 +65,17 @@ async def publish_work(
     checked = []
     for i, p in enumerate(proof):
         p_data = await storage.read_upload(p)
-        ext = storage.kind_of(p, p_data)[1]
+        proof_ext = storage.kind_of(p, p_data)[1]
         claim = proof_claims[i] if proof_claims else None
-        checked.append((p_data, ext, await verify_proof(db, user.id, storage.sha256(p_data), claim)))
+        checked.append((p_data, proof_ext, await verify_proof(db, user.id, storage.sha256(p_data), claim)))
     proofs = []
     now = datetime.now(UTC)
-    for i, (p_data, ext, evidence) in enumerate(checked):
+    for i, (p_data, proof_ext, evidence) in enumerate(checked):
         captured = evidence.captured_at_ms
         # Spaced by a microsecond so the proofs keep the order they were sent in.
         proofs.append(
             WorkProof(
-                path=storage.save(p_data, ext, private=proof_visibility != PUBLIC),
+                path=storage.save(p_data, proof_ext, private=proof_visibility != PUBLIC),
                 visibility=proof_visibility,
                 created_at=now + timedelta(microseconds=i),
                 source=evidence.source,
@@ -94,6 +97,8 @@ async def publish_work(
         exposition_id=exposition_id,
         media_path=storage.save(data, ext),
         media_kind=kind,
+        media_hd_path=storage.save(*hd) if hd else None,
+        poster_path=storage.save(*still) if still else None,
         proofs=proofs,
         sha256=fingerprint,
         ai_declared=ai_declared,
@@ -109,6 +114,28 @@ async def publish_work(
     except IntegrityError as e:  # the same file published at the same instant
         raise Conflict("duplicate_work", "This exact file is already published on Artiko") from e
     return work
+
+
+async def _read_model_extras(
+    kind: str, model_hd: UploadFile | None, poster: UploadFile | None
+) -> tuple[tuple[bytes, str] | None, tuple[bytes, str] | None]:
+    """The detailed GLB and the poster of a 3D work, as (bytes, extension), checked before anything is stored."""
+    if (model_hd or poster) and kind != "model":
+        raise BadRequest("extras_need_model", "model_hd and poster are accepted only with a GLB file")
+    hd = await _read_as(model_hd, "model", "invalid_model_hd", "model_hd must be a GLB file") if model_hd else None
+    still = await _read_as(poster, "image", "invalid_poster", "poster must be a JPEG, PNG or WebP") if poster else None
+    return hd, still
+
+
+async def _read_as(upload: UploadFile, expected_kind: str, code: str, message: str) -> tuple[bytes, str]:
+    data = await storage.read_upload(upload)
+    try:
+        kind, ext = storage.kind_of(upload, data)
+    except BadRequest as e:
+        raise BadRequest(code, message) from e
+    if kind != expected_kind:
+        raise BadRequest(code, message)
+    return data, ext
 
 
 async def _join_series(db: Db, earlier_id: uuid.UUID | None) -> uuid.UUID | None:
