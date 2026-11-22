@@ -2,12 +2,13 @@
 
 import uuid
 
-from sqlalchemy import ColumnElement, and_, case, func, select, update
+from sqlalchemy import ColumnElement, and_, case, exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
+from app.features.artists.models import Artist
 from app.features.review.models import CLEARED, CONFIRMED, OPEN, ReviewCase
 from app.platform.db import Db
-from app.platform.errors import Conflict, NotFound
+from app.platform.errors import Conflict, Forbidden, NotFound
 from app.platform.pagination import Page
 
 POSSIBLE_COPY = "possible_copy"
@@ -100,16 +101,20 @@ async def list_cases(db: Db, status: str, page: Page) -> list[ReviewCase]:
 
 
 async def decide(db: Db, case_id: uuid.UUID, decision: str, reviewer_id: str) -> ReviewCase:
+    reviewers_own_case = exists().where(Artist.id == ReviewCase.artist_id, Artist.user_id == reviewer_id)
     # One conditional UPDATE: two reviewers deciding at once cannot both win.
     decided = await db.scalar(
         update(ReviewCase)
-        .where(ReviewCase.id == case_id, ReviewCase.status == OPEN)
+        .where(ReviewCase.id == case_id, ReviewCase.status == OPEN, ~reviewers_own_case)
         .values(status=decision, decided_by=reviewer_id, decided_at=func.now())
         .returning(ReviewCase)
     )
     if decided is None:
-        if await db.get(ReviewCase, case_id) is None:
+        case = await db.get(ReviewCase, case_id)
+        if case is None:
             raise NotFound("case_not_found", "No review case with this id")
+        if await db.scalar(select(reviewers_own_case.where(ReviewCase.id == case_id))):
+            raise Forbidden("own_case", "A reviewer cannot decide a case about their own work")
         raise Conflict("case_already_decided", "Only an open case can be decided")
     await db.commit()
     return decided

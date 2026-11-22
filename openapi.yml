@@ -554,7 +554,7 @@ paths:
       description: |
         `cleared`: not a copy. The artist may publish this exact file (same SHA-256) again and the copy check
         lets it through. `confirmed`: a copy, the file stays refused. Only an open case can be decided
-        (`case_already_decided`, 409).
+        (`case_already_decided`, 409), and never by the reviewer whose own publication it is about (`own_case`, 403).
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -568,7 +568,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ReviewCase" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403":
+          description: Not a reviewer (`not_a_reviewer`), or the case is about the reviewer's own publication (`own_case`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/Invalid" }

@@ -134,6 +134,15 @@ def test_a_confirmed_case_outweighs_a_cleared_one(client, reviewer):
     assert post_work(client, "bob", copy).status_code == 409
 
 
+def test_a_reviewer_cannot_decide_their_own_case(client, reviewer):
+    copy, case_id = refuse_copy(client, REVIEWER)
+    for decision in ("cleared", "confirmed"):
+        refused = decide(client, case_id, decision, reviewer)
+        assert refused.status_code == 403 and refused.json()["error"]["code"] == "own_case"
+    assert [c["status"] for c in client.get(CASES, headers=reviewer).json()] == ["open"]
+    assert post_work(client, REVIEWER, copy).status_code == 409
+
+
 def test_only_an_open_case_can_be_decided(client, reviewer):
     _, case_id = refuse_copy(client)
     assert decide(client, case_id, "confirmed", reviewer).status_code == 200
