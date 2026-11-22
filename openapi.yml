@@ -203,6 +203,18 @@ paths:
                   type: array
                   maxItems: 5
                   items: { type: string, format: binary }
+                model_hd:
+                  type: string
+                  format: binary
+                  description: |
+                    Detailed GLB of a 3D work, loaded on demand; only with a GLB `file`.
+                    Errors (400): `extras_need_model` when `file` is not a GLB, `invalid_model_hd`.
+                poster:
+                  type: string
+                  format: binary
+                  description: |
+                    Still image (jpeg, png, webp) shown while a 3D work loads; only with a GLB `file`.
+                    Errors (400): `extras_need_model` when `file` is not a GLB, `invalid_poster`.
       responses:
         "201":
           description: The published work
@@ -667,6 +679,8 @@ components:
         exposition_id: { type: [string, "null"], format: uuid, description: Always present; null when the work is in no exposition }
         series_id: { type: [string, "null"], format: uuid, description: Shared by an artist's works that are near-copies of each other }
         media_url: { type: string, format: uri }
+        media_hd_url: { type: [string, "null"], format: uri, description: Detailed GLB of a 3D work, null when it has none }
+        poster_url: { type: [string, "null"], format: uri, description: Still image shown while a 3D work loads, null when it has none }
         media_kind: { $ref: "#/components/schemas/MediaKind" }
         proof_urls:
           type: array

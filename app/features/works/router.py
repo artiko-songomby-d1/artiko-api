@@ -71,12 +71,15 @@ async def create_work(
     proof_visibility: Annotated[Literal["public", "reviewers"], Form()] = REVIEWERS,
     proof_claims: Annotated[str | None, Form(max_length=20000)] = None,
     proof: Annotated[list[UploadFile] | None, File()] = None,
+    model_hd: Annotated[UploadFile | None, File()] = None,
+    poster: Annotated[UploadFile | None, File()] = None,
 ) -> WorkOut:
     work = await service.publish_work(
         db, user, title=title, story=story, category=category,
         ai_declared=ai_declared, exposition_id=exposition_id, file=file, proof=proof or [],
         proof_visibility=proof_visibility,
         proof_claims=parse_claims(proof_claims),
+        model_hd=model_hd, poster=poster,
     )
     return await load_work(db, work.id, user)
 

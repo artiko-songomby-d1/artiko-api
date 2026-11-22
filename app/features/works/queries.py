@@ -39,6 +39,8 @@ def to_out(
         exposition_id=work.exposition_id,
         series_id=work.series_id,
         media_url=storage.media_url(work.media_path),
+        media_hd_url=storage.media_url(work.media_hd_path) if work.media_hd_path else None,
+        poster_url=storage.media_url(work.poster_path) if work.poster_path else None,
         media_kind=work.media_kind,
         proof_urls=visible_proof_urls(work, owner_user_id, viewer),
         sha256=work.sha256,
