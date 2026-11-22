@@ -29,7 +29,7 @@ limiter = SlidingWindowLimiter()
     ],
 )
 async def cast_vote(body: VoteIn, user: User, db: Db) -> VoteOut:
-    return VoteOut.model_validate(await service.cast_vote(db, user.id, body.work_id))
+    return VoteOut.model_validate(await service.cast_vote(db, user, body.work_id))
 
 
 @router.get("/votes/mine")

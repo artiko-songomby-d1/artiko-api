@@ -69,6 +69,9 @@ class CurrentUser:
     name: str | None
     # Better Auth role claim: "reviewer" may open private proofs and work the review queue.
     role: str | None = None
+    # Better Auth copies the user into the token, `emailVerified` included. False when the claim is missing:
+    # a token that says nothing about the email proves nothing about it.
+    email_verified: bool = False
 
     @property
     def is_reviewer(self) -> bool:
@@ -90,7 +93,14 @@ async def decode_token(token: str) -> CurrentUser:
         # Exception messages may contain token-controlled data, such as the signing key ID.
         log.debug("JWT validation failed (%s)", type(error).__name__)
         raise Unauthorized("invalid_token", "Invalid token") from error
-    return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"), role=claims.get("role"))
+    return CurrentUser(
+        id=claims["sub"],
+        email=claims.get("email"),
+        name=claims.get("name"),
+        role=claims.get("role"),
+        # Only the boolean true counts: the string "true" or 1 could come from a field a user controls.
+        email_verified=claims.get("emailVerified") is True,
+    )
 
 
 async def current_user(

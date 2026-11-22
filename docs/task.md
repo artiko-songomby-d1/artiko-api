@@ -35,11 +35,15 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
     `CF-Connecting-IP`, n'est pas documenté par Render (non vérifié, seulement des posts de la communauté).
     → Confirmer en prod, par exemple en envoyant un `CF-Connecting-IP` forgé et en vérifiant qu'il n'est
     pas pris comme clé.
-- [ ] **8. Vote sans email vérifié** : `CurrentUser` ne lit aucun claim `email_verified` (`auth.py:89`) ;
-  avec l'inscription libre côté web, comptes jetables = votes multiples.
-  → En cours : PR #18 (`feat/verified-email-tokens`, ouverte, non mergée) refuse les jetons dont le claim
-  `emailVerified` n'est pas `true`. Elle part d'un ancien `develop` : à rebaser, conflit attendu avec le
-  point 22 dans `auth.py`.
+- [ ] **8. Vote sans email vérifié** — *partiellement corrigé.*
+  - Fait : `CurrentUser` lit le claim `emailVerified` du jeton (`auth.py`). Avec
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=true`, `POST /votes` répond 403 `email_not_verified` si l'email du
+    votant n'est pas vérifié (`votes/service.py`). Les autres routes ne sont pas concernées.
+  - Reste : le réglage vaut `false` par défaut, car le web ne vérifie pas encore les emails à
+    l'inscription : l'activer maintenant bloquerait tous les votes. → L'activer en prod (et l'ajouter à
+    `render.yaml`) quand la PR web des comptes vérifiés est fusionnée. Non vérifié sur un vrai jeton
+    Better Auth : le nom du claim vient de la PR #18 (`feat/verified-email-tokens`, non mergée), qui va
+    plus loin en refusant tout jeton non vérifié ; les deux approches sont à arbitrer.
 - [ ] **9. Rôle `reviewer` lu depuis le JWT** (`auth.py:69`) alors que le web n'active pas de plugin de
   rôles Better Auth (non vérifié) : soit le rôle est inatteignable, soit il faut garantir qu'aucun
   utilisateur ne peut l'écrire lui-même.

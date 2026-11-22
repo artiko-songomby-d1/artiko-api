@@ -417,6 +417,8 @@ paths:
         Refused when the work is not human-proven (`not_eligible`), was not published this
         month (`not_in_contest`) or belongs to the voter (`own_work`), all 400; and when the
         voter already voted in this category this month (`already_voted`, 409).
+        When the server sets `REQUIRE_VERIFIED_EMAIL_TO_VOTE`, a voter whose email is not verified is
+        refused with 403 `email_not_verified`.
         Each user may try 30 votes a minute; past that the API answers 429 with a `Retry-After` header.
       security: [{ bearer: [] }]
       requestBody:
@@ -436,6 +438,7 @@ paths:
               schema: { $ref: "#/components/schemas/Vote" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
@@ -579,7 +582,7 @@ components:
       description: Missing or invalid token (`unauthorized`, `invalid_token`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Forbidden:
-      description: Signed in, but not allowed (`not_an_artist`)
+      description: Signed in, but not allowed (`not_an_artist`, `email_not_verified`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: No such resource
