@@ -82,8 +82,8 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
   les preuves.
 - [ ] **21. CORS `allow_credentials=True`** (`main.py:32`) alors que l'API n'utilise que des bearer
   tokens : inutile, à retirer.
-- [ ] **22. Détail de l'erreur JWT renvoyé au client** (`auth.py:88`, `f"Invalid token: {e}"`) : à garder
-  dans les logs.
+- [x] **22. Détail de l'erreur JWT renvoyé au client** : réponse 401 générique. Le type d'erreur est
+  journalisé au niveau debug sans le jeton, les claims ou le détail fourni par le client.
 - [x] **23. Rate limit en mémoire par processus** : les instances partagent les compteurs lorsque
   `RATE_LIMIT_REDIS_URL` est configurée. Sans cette variable, les compteurs restent locaux au processus.
 - [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `redis`, `sse-starlette`,
