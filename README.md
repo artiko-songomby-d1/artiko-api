@@ -46,6 +46,8 @@ Captures. Only proof captured in the app counts for the human-made badge. A phon
 
 `POST /scan/image` is public and runs the CLIP model, so it takes photos up to 5 MB (`SCAN_MAX_UPLOAD_MB`) and is rate limited: 20 a minute per client (`SCAN_RATE_LIMIT_PER_MINUTE`) and 120 a minute for everyone (`SCAN_GLOBAL_RATE_LIMIT_PER_MINUTE`). A client is its IPv4 address or IPv6 /64 network. Behind a proxy the socket peer is the proxy itself, so set `CLIENT_IP_HEADER` to the header your host overwrites with the real client IP (never one a client can send); until then every client shares one counter and the per-client limit behaves like the global one.
 
+Each API process checks for scan similarity index updates every `SCAN_INDEX_REFRESH_SECONDS` (default 15 seconds) when handling scans. A successful image publication invalidates the local process's index immediately, and other processes pick up the image on their next refresh. Set the interval to `0` to refresh on every scan. Publication checks always refresh before matching.
+
 With `RATE_LIMIT_REDIS_URL` unset, the scan, signed proof download, and device endpoints keep process-local counters. For multiple API instances, set the same Redis URL on each instance (in Render, add it in the service's Environment settings), for example `rediss://<host>:6379/0` for a TLS-enabled Redis service. Use a separate Redis database or instance per API environment so its counters stay independent. The limited endpoints return `503 rate_limit_unavailable` until a configured Redis service is reachable.
 
 Uploads go to the bucket when `MEDIA_BUCKET` is set (local `MEDIA_DIR` otherwise) and are served by the API at `/media/<sha256>.<ext>`. A free instance sleeps after 15 idle minutes: open `/api/v1/health` a minute before a demo.

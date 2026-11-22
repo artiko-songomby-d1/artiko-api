@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import NonNegativeInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,6 +48,8 @@ class Settings(BaseSettings):
     models_dir: str = "models"
     # Cosine similarity above which a scanned photo is the same work (CLIP ViT-B/32).
     scan_match_threshold: float = 0.85
+    # Seconds before a scan checks the database for index updates again. Zero refreshes every scan.
+    scan_index_refresh_seconds: NonNegativeInt = 15
     # Where the web app lives (links in scan sources).
     public_web_url: str = "http://localhost:3000"
     # Publishing is refused when the image is this similar (CLIP cosine) to another artist's work or a known work.

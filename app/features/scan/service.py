@@ -24,7 +24,7 @@ async def identify(db: Db, data: bytes, mime: str) -> ScanResult:
 
     vec = await run_in_threadpool(embed, data)
     index = get_index()
-    await index.refresh(db)
+    await index.refresh(db, max_age_seconds=get_settings().scan_index_refresh_seconds)
     kind, match_id, score = index.search(vec)
     if kind is None or score < get_settings().scan_match_threshold:
         return ScanResult(status="unknown", confidence=round(max(score, 0.0), 3))

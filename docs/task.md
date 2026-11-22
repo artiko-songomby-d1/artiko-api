@@ -76,8 +76,9 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 - [ ] **18. Détection pHash en scan complet** : chaque publication charge le pHash de toutes les œuvres
   et compare en Python (`integrity/service.py:49`). → Requête SQL / index dès que le volume grandit,
   comme prévu pour CLIP (`scan/index.py:3`).
-- [ ] **19. `refresh` de l'index à chaque scan** (`scan/service.py:27`) : 2 requêtes DB par scan sous
-  verrou global ; un TTL suffirait.
+- [x] **19. `refresh` de l'index à chaque scan** : délai par processus configurable via
+  `SCAN_INDEX_REFRESH_SECONDS` (15 s par défaut). Une publication invalide l'index local après validation
+  de la transaction. Le contrôle des doublons continue d'actualiser l'index avant la comparaison.
 - [x] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` utilisent
   `limit` et `offset`. Le musée charge les preuves et calcule la salle pour les œuvres de la page.
 - [x] **21. CORS `allow_credentials=True`** : option retirée. Les origines configurées peuvent
