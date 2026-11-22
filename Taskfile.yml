@@ -1,0 +1,22 @@
+version: '3'
+
+tasks:
+  default:
+    cmds:
+      - task: check
+
+  check:
+    desc: Run lint and the full test suite
+    cmds:
+      - task: lint
+      - task: test
+
+  lint:
+    desc: Run Ruff
+    cmds:
+      - uv run --frozen ruff check .
+
+  test:
+    desc: Run pytest (pass pytest arguments after --)
+    cmds:
+      - uv run --frozen pytest {{.CLI_ARGS}}

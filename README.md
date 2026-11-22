@@ -18,12 +18,15 @@ uv run uvicorn app.main:app --reload
 
 ## Tests
 
-```
-uv run ruff check .
-uv run pytest
+With Go Task and `uv` installed, run lint and the full test suite with `task` (or `task check`).
+
+```sh
+task lint                          # Ruff only
+task test                          # Full pytest suite
+task test -- tests/test_health.py  # Run a single test file
 ```
 
-Tests run on `TEST_DATABASE_URL` (every table is truncated between tests) and never call the network: the JWT key is generated locally and embeddings use `EMBED_PROVIDER=none`.
+Set `TEST_DATABASE_URL` in `.env` or in your shell to a dedicated PostgreSQL test database. The suite applies migrations and truncates tables between tests. It uses a local JWT key and sets `EMBED_PROVIDER=none`.
 
 ## Deploy (Render)
 
