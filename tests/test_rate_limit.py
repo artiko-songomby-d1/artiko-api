@@ -55,11 +55,13 @@ def test_shared_limiter_outage_returns_503(client, monkeypatch):
     async def unavailable(*args, **kwargs):
         raise RedisConnectionError("internal connection detail")
 
+    get_settings.cache_clear()
     monkeypatch.setattr(get_settings(), "rate_limit_redis_url", "redis://localhost:6379/0")
     monkeypatch.setattr(rate_limit.Redis, "eval", unavailable)
 
     # Lifespan creates and closes the async Redis client on the application's event loop.
     with TestClient(client.app) as running_client:
+        assert running_client.app.state.rate_limiter is not None
         response = running_client.get("/api/v1/devices/challenge")
     assert response.status_code == 503
     assert response.json() == {

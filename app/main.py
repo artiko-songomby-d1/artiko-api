@@ -33,10 +33,11 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if not settings.rate_limit_redis_url:
+        redis_url = get_settings().rate_limit_redis_url
+        if not redis_url:
             yield
             return
-        limiter = RedisSlidingWindowLimiter(settings.rate_limit_redis_url)
+        limiter = RedisSlidingWindowLimiter(redis_url)
         app.state.rate_limiter = limiter
         try:
             yield
