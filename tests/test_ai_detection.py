@@ -63,6 +63,8 @@ CONFIGURED = {"ai_detection_provider": "sightengine", "sightengine_user": "u-123
         ("ai_detection_wait_seconds", "nan"),
         ("ai_detection_ffmpeg_memory_mb", 0),
         ("ai_detection_max_video_checks", 0),
+        ("works_rate_limit_per_minute", 0),
+        ("works_global_rate_limit_per_minute", 0),
         ("sightengine_user", "   "),
         ("sightengine_secret", " \t "),
     ],

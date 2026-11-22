@@ -78,20 +78,27 @@ def client_key(request: Request) -> str:
     return normalise(request.client.host) if request.client else "unknown"
 
 
+def enforce_limits(limiter: SlidingWindowLimiter, client: str, per_client: int, overall: int) -> None:
+    """Counts the request, or raises 429 once `client`, or all clients together, pass their per-minute caps.
+
+    Call it from the event loop only (an async dependency with no await), so two threads never touch the limiter.
+    """
+    now = time.monotonic()
+    # Count a request in both buckets only when both allow it: a client stuck at its own limit must
+    # not use up the global budget and lock everyone else out.
+    wait = limiter.wait_for(client, per_client, now) or limiter.wait_for(GLOBAL_KEY, overall, now)
+    if wait is not None:
+        raise TooManyRequests("rate_limited", "Too many requests, try again shortly", retry_after=wait)
+    limiter.record(client, now)
+    limiter.record(GLOBAL_KEY, now)
+
+
 def limit_per_minute(
     limiter: SlidingWindowLimiter, per_client: Callable[[], int], overall: Callable[[], int]
 ) -> Callable:
-    """A dependency that answers 429 once one client, or all clients together, pass their per-minute caps."""
+    """A dependency that answers 429 once one client address, or all clients together, pass their caps."""
 
-    # async on purpose: it runs on the event loop with no await, so the limiter is never touched by two threads.
     async def check(request: Request) -> None:
-        client, now = client_key(request), time.monotonic()
-        # Count a request in both buckets only when both allow it: a client stuck at its own limit must
-        # not use up the global budget and lock everyone else out.
-        wait = limiter.wait_for(client, per_client(), now) or limiter.wait_for(GLOBAL_KEY, overall(), now)
-        if wait is not None:
-            raise TooManyRequests("rate_limited", "Too many requests, try again shortly", retry_after=wait)
-        limiter.record(client, now)
-        limiter.record(GLOBAL_KEY, now)
+        enforce_limits(limiter, client_key(request), per_client(), overall())
 
     return Depends(check)

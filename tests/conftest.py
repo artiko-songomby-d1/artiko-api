@@ -72,10 +72,11 @@ def _clean_db():
 
     limiter.reset()
     from app.features.devices.router import limiter as device_limiter
-    from app.features.works.router import proof_limiter
+    from app.features.works.router import proof_limiter, publish_limiter
 
     device_limiter.reset()
     proof_limiter.reset()
+    publish_limiter.reset()
     yield
 
 

@@ -288,3 +288,38 @@ def test_logs_hold_no_secret_bytes_or_score(client, sightengine, caplog):
     ]
     for leak in (TEST_SECRET, TEST_USER, "0.93", "0.42", "\\x89PNG", "IHDR"):
         assert leak not in caplog.text
+
+
+def test_publishing_is_rate_limited_per_user_and_overall(client, sightengine, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ai_detection_provider", "sightengine")
+    monkeypatch.setattr(settings, "works_rate_limit_per_minute", 2)
+    monkeypatch.setattr(settings, "works_global_rate_limit_per_minute", 3)
+    become_artist(client, "alice")
+
+    assert [publish(client, "alice", seed).status_code for seed in (1, 2)] == [201, 201]
+    refused = publish(client, "alice", 3)
+    assert refused.status_code == 429 and refused.json()["error"]["code"] == "rate_limited"
+    assert 1 <= int(refused.headers["Retry-After"]) <= 61
+    assert len(sightengine.requests) == 2
+
+    assert publish(client, "bob", 4).status_code == 403  # counted: not an artist, but the request was sent
+    overall = publish(client, "carol", 5)
+    assert overall.status_code == 429 and "Retry-After" in overall.headers
+    assert len(sightengine.requests) == 2
+
+
+def test_publishing_is_not_rate_limited_when_detection_is_off(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "works_rate_limit_per_minute", 1)
+    monkeypatch.setattr(get_settings(), "works_global_rate_limit_per_minute", 1)
+    become_artist(client, "alice")
+    assert [publish(client, "alice", seed, proofs=0).status_code for seed in (1, 2, 3)] == [201, 201, 201]
+
+
+def test_an_anonymous_publish_is_refused_before_the_rate_limit(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "ai_detection_provider", "sightengine")
+    monkeypatch.setattr(get_settings(), "works_global_rate_limit_per_minute", 1)
+    fields = {"title": "A work", "category": "painting"}
+    for _ in range(3):
+        r = client.post("/api/v1/works", data=fields, files=[("file", ("w.png", png(1), "image/png"))])
+        assert r.status_code == 401

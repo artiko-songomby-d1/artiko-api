@@ -169,7 +169,8 @@ paths:
         When AI detection is on and `ai_declared` is false, the main image, or 3 frames of the main MP4, are sent
         to Sightengine before anything is stored; a file it finds AI-generated is refused with 400
         `ai_generated_content`. Audio, 3D files, posters and proof files are never sent. When Sightengine cannot
-        answer, the work is accepted.
+        answer, the work is accepted. While AI detection is on, each user may publish 10 times a minute and all
+        users together 30 times; past that the API answers 429 with a `Retry-After` header.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -237,6 +238,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/works/{work_id}:
     parameters:

@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import TypeAdapter, ValidationError
 
 from app.features.works import service
@@ -19,7 +19,7 @@ from app.platform.db import Db
 from app.platform.errors import BadRequest, Forbidden, NotFound
 from app.platform.months import MONTH
 from app.platform.pagination import Paged
-from app.platform.rate_limit import SlidingWindowLimiter, limit_per_minute
+from app.platform.rate_limit import SlidingWindowLimiter, enforce_limits, limit_per_minute
 
 router = APIRouter(tags=["works"])
 claims_adapter = TypeAdapter(list[ProofClaimIn])
@@ -34,6 +34,16 @@ def parse_claims(raw: str | None) -> list[ProofClaim | None] | None:
     except ValidationError as e:
         raise BadRequest("invalid_proof_claims", "proof_claims must be a JSON list of valid claims") from e
 proof_limiter = SlidingWindowLimiter()
+publish_limiter = SlidingWindowLimiter()
+
+
+async def limit_publishing(user: User) -> None:
+    """Each publish may spend Sightengine operations from a small free quota: cap them per user and overall."""
+    settings = get_settings()
+    if settings.ai_detection_provider == "sightengine":
+        per_user, overall = settings.works_rate_limit_per_minute, settings.works_global_rate_limit_per_minute
+        # The prefix keeps a user id from ever matching the limiter's global key.
+        enforce_limits(publish_limiter, f"user:{user.id}", per_user, overall)
 
 
 @router.get("/categories")
@@ -59,7 +69,7 @@ async def read_work(work_id: uuid.UUID, db: Db, viewer: OptionalUser) -> WorkOut
     return await load_work(db, work_id, viewer)
 
 
-@router.post("/works", status_code=201)
+@router.post("/works", status_code=201, dependencies=[Depends(limit_publishing)])
 async def create_work(
     user: User,
     db: Db,
