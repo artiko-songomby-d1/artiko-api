@@ -29,7 +29,7 @@ def test_artists_are_paged(client):
 def test_paging_bounds_are_validated(client):
     artist_id = become_artist(client, "alice")
     for endpoint in ("/api/v1/works", "/api/v1/expositions", f"/api/v1/artists/{artist_id}/museum"):
-        for query in ("limit=0", "limit=201", "offset=-1"):
+        for query in ("limit=0", "limit=201", "offset=-1", "offset=1000001", f"offset={10**30}"):
             r = client.get(f"{endpoint}?{query}")
             assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
 

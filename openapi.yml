@@ -175,9 +175,10 @@ paths:
         proofs counted (same SHA-256, or for images the same picture resized or recompressed, do not count
         twice); such a file is still stored. The same file (SHA-256) cannot be published twice. An image that looks like another
         artist's work or a known work (CLIP similarity or perceptual hash) is refused with 409 `possible_copy`
-        and the id of the review case; one that looks like the artist's own earlier work is accepted and the two
-        works share a `series_id`. Sending a refused file again answers with the same case while it is open, and
-        an artist with 20 open cases gets the latest one instead of a new one.
+        and the id of the review case (retrying the same file returns the same open case, or the confirmed one once a reviewer confirmed
+        it as a copy, and an artist with 20 open cases gets the latest one instead of a new one); once a reviewer clears
+        the case, the artist may publish that exact file, unless a case for it was confirmed. One that looks like the
+        artist's own earlier work is accepted and the two works share a `series_id`.
         Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
         video (mp4, webm), 3D (glb). Each part must be sent with the content type its bytes really are
         (`unsupported_file`, 400, otherwise: a PNG sent as `image/jpeg` is refused). A picture with too many
@@ -550,6 +551,64 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
         "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
+  /api/v1/review/cases:
+    get:
+      operationId: listReviewCases
+      tags: [review]
+      summary: The review queue (reviewers only)
+      description: |
+        Reviewers are the users listed in the API's `REVIEWER_USER_IDS`; a role claim in the token is ignored.
+        Cases are listed oldest first, with IDs breaking timestamp ties.
+      security: [{ bearer: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, cleared, confirmed], default: open }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Cases with this status, one page
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ReviewCase" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /api/v1/review/cases/{case_id}/decision:
+    parameters:
+      - { name: case_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: decideReviewCase
+      tags: [review]
+      summary: Decide an open case (reviewers only)
+      description: |
+        `cleared`: not a copy. The artist may publish this exact file (same SHA-256) again and the copy check
+        lets it through. `confirmed`: a copy, the file stays refused. Only an open case can be decided
+        (`case_already_decided`, 409), and never by the reviewer whose own publication it is about (`own_case`, 403).
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewDecisionIn" }
+      responses:
+        "200":
+          description: The decided case
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewCase" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Not a reviewer (`not_a_reviewer`), or the case is about the reviewer's own publication (`own_case`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
 components:
   securitySchemes:
     bearer:
@@ -567,7 +626,7 @@ components:
       name: offset
       in: query
       description: Items to skip; request the next page with `offset += limit`
-      schema: { type: integer, minimum: 0, default: 0 }
+      schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
     ArtistId:
       name: artist_id
       in: path
@@ -582,13 +641,13 @@ components:
       description: Missing or invalid token (`unauthorized`, `invalid_token`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Forbidden:
-      description: Signed in, but not allowed (`not_an_artist`, `email_not_verified`)
+      description: Signed in, but not allowed (`not_an_artist`, `not_a_reviewer`, `email_not_verified`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: No such resource
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Conflict:
-      description: Already exists (`already_voted`, `duplicate_work`)
+      description: Conflicts with the current state (`already_voted`, `duplicate_work`, `possible_copy`, `case_already_decided`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     TooLarge:
       description: File over the size limit (`file_too_large`), or picture with too many pixels (`image_too_large`)
@@ -889,3 +948,31 @@ components:
             properties:
               label: { type: string }
               url: { type: string, format: uri }
+
+    ReviewCase:
+      type: object
+      required: [id, reason, status, work_id, other_work_id, known_work_id, artist_id, candidate_sha256, score, signal,
+        created_at, decided_by, decided_at]
+      properties:
+        id: { type: string, format: uuid }
+        reason: { type: string, examples: [possible_copy] }
+        status: { type: string, enum: [open, cleared, confirmed] }
+        work_id:
+          type: [string, "null"]
+          format: uuid
+          description: The work under review; null when the publication was refused
+        other_work_id: { type: [string, "null"], format: uuid, description: The Artiko work it looks like }
+        known_work_id: { type: [string, "null"], format: uuid, description: The known work it looks like }
+        artist_id: { type: [string, "null"], format: uuid, description: Who tried to publish it }
+        candidate_sha256: { type: [string, "null"], description: SHA-256 of the refused file }
+        score: { type: [number, "null"] }
+        signal: { type: [string, "null"], enum: [clip, phash, null] }
+        created_at: { type: string, format: date-time }
+        decided_by: { type: [string, "null"], description: User id of the reviewer who decided it }
+        decided_at: { type: [string, "null"], format: date-time }
+
+    ReviewDecisionIn:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [cleared, confirmed] }

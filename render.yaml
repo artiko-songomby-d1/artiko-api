@@ -50,3 +50,7 @@ services:
       # Transition switch (see the README): set to "false" once the Android app captures signed proof.
       - key: ALLOW_IMPORTED_PROOFS_FOR_BADGE
         value: "true"
+      # Better Auth user ids of the reviewers, comma-separated (empty = nobody). Not a `value`, so a sync
+      # never wipes the list: on the existing service Render skips this entry, so add it in the dashboard.
+      - key: REVIEWER_USER_IDS
+        sync: false

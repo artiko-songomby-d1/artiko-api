@@ -13,7 +13,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.platform.config import get_settings
-from app.platform.errors import Unauthorized
+from app.platform.errors import Forbidden, Unauthorized
 
 log = logging.getLogger(__name__)
 _bearer = HTTPBearer(auto_error=False)
@@ -67,15 +67,12 @@ class CurrentUser:
     id: str
     email: str | None
     name: str | None
-    # Better Auth role claim: "reviewer" may open private proofs and work the review queue.
-    role: str | None = None
+    # Reviewers may open private proofs and work the review queue. The API designates them (REVIEWER_USER_IDS):
+    # Better Auth issues no role claim, so a claim in the token is never trusted.
+    is_reviewer: bool = False
     # Better Auth copies the user into the token, `emailVerified` included. False when the claim is missing:
     # a token that says nothing about the email proves nothing about it.
     email_verified: bool = False
-
-    @property
-    def is_reviewer(self) -> bool:
-        return self.role == "reviewer"
 
 
 async def decode_token(token: str) -> CurrentUser:
@@ -97,7 +94,7 @@ async def decode_token(token: str) -> CurrentUser:
         id=claims["sub"],
         email=claims.get("email"),
         name=claims.get("name"),
-        role=claims.get("role"),
+        is_reviewer=claims["sub"] in s.reviewer_user_id_set,
         # Only the boolean true counts: the string "true" or 1 could come from a field a user controls.
         email_verified=claims.get("emailVerified") is True,
     )
@@ -120,3 +117,12 @@ async def optional_user(
 
 User = Annotated[CurrentUser, Depends(current_user)]
 OptionalUser = Annotated[CurrentUser | None, Depends(optional_user)]
+
+
+async def current_reviewer(user: User) -> CurrentUser:
+    if not user.is_reviewer:
+        raise Forbidden("not_a_reviewer", "Only reviewers may do this")
+    return user
+
+
+Reviewer = Annotated[CurrentUser, Depends(current_reviewer)]

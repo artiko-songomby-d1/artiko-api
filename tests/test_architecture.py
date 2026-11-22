@@ -43,7 +43,7 @@ ALLOWED = {
     "artists": set(),
     "practices": {"works"},
     "works": {"artists"},
-    "review": set(),
+    "review": {"artists"},
     "devices": {"works"},
     "integrity": {"works", "scan", "review"},
     "expositions": {"works", "artists"},
