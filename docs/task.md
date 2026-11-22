@@ -23,6 +23,8 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
     encore le badge, donc le droit de vote (`votes/service.py:23`). Les preuves non-image (vidéo…) ne
     sont comparées que par SHA-256 : modifier un octet suffit. → Passer à `false` en prod dès que la
     capture signée de l'app Android est disponible.
+  - Décision du 2026-11-22 : garder `true` en prod pour l'instant. Avec `false`, le web n'envoyant que des
+    preuves importées, plus personne n'obtiendrait le badge ni ne pourrait voter.
 - [ ] **2. Vérification de l'attestation Android incomplète** (`devices/attestation.py:68`) :
   - aucune vérification que les certificats intermédiaires sont des CA (`BasicConstraints ca=True`,
     `keyCertSign`) : un attaquant qui possède une clé attestée légitime (son propre téléphone) pourrait
@@ -38,6 +40,9 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
     `CF-Connecting-IP`, n'est pas documenté par Render (non vérifié, seulement des posts de la communauté).
     → Confirmer en prod, par exemple en envoyant un `CF-Connecting-IP` forgé et en vérifiant qu'il n'est
     pas pris comme clé.
+  - Procédure (à faire par l'équipe, pas automatisée) : envoyer ~21 `POST /api/v1/scan/image` en moins
+    d'une minute, chacun avec un `CF-Connecting-IP` forgé différent. Une réponse 429 avant la fin prouve
+    que l'en-tête forgé est ignoré ; aucune 429 prouve qu'il est pris comme clé (à corriger).
 - [ ] **4. Endpoints coûteux sans rate limit** : `POST /works` (jusqu'à 6 × 20 Mo en mémoire + CLIP),
   `POST /votes`, `PUT /me/artist`, `POST /expositions`. Chaque `POST /works` refusé pour copie crée en
   plus un `ReviewCase` en base (`integrity/service.py:65`) → la table peut être spammée.
@@ -53,12 +58,16 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
   à plusieurs œuvres pendant 10 min.
 - [ ] **8. Vote sans email vérifié** : `CurrentUser` ne lit aucun claim `email_verified` (`auth.py:89`) ;
   avec l'inscription libre côté web, comptes jetables = votes multiples.
-  → En cours : PR #18 (`feat/verified-email-tokens`, ouverte, non mergée) refuse les jetons dont le claim
-  `emailVerified` n'est pas `true`. Elle part d'un ancien `develop` : à rebaser, conflit attendu avec le
-  point 22 dans `auth.py`.
-- [ ] **9. Rôle `reviewer` lu depuis le JWT** (`auth.py:69`) alors que le web n'active pas de plugin de
-  rôles Better Auth (non vérifié) : soit le rôle est inatteignable, soit il faut garantir qu'aucun
-  utilisateur ne peut l'écrire lui-même.
+  → En revue : PR #18 (`feat/verified-email-tokens`, base `develop`) refuse les jetons dont le claim
+  `emailVerified` n'est pas `true` (403 `email_not_verified`). `develop` y est fusionné, le conflit avec
+  le point 22 est résolu ; ruff OK, pytest 150 passed / 2 skipped (Docker, Postgres 17 jetable).
+- [ ] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé dans la PR #27, en revue.*
+  - Constat : artiko-web (`src/lib/auth.ts`) n'active que les plugins `jwt`, `bearer`,
+    `breachedPasswordCheck` et `nextCookies`, sans champ `role` : le JWT n'a jamais de claim `role`, donc
+    personne n'était reviewer (et personne ne pouvait s'attribuer le rôle).
+  - Correctif : les reviewers sont désignés côté API par `REVIEWER_USER_IDS` (ids Better Auth, vide =
+    personne) ; le claim `role` n'est plus lu. À renseigner à la main dans le tableau de bord Render
+    (`sync: false`).
 - [ ] **10. CI** (`.github/workflows/ci.yml`) : `push` seulement sur `main` (pas `develop`) ; les jobs
   `test` et `docker` n'ont pas de bloc `permissions:` ; actions épinglées par tag et non par SHA.
 - [ ] **11. Dockerfile** : tourne en root, image de base non épinglée par digest ; `alembic upgrade head`
@@ -80,7 +89,11 @@ partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non
   → `IntegrityError` sur `user_id` unique → 500 au lieu d'un upsert.
 - [ ] **16. Les cas de revue n'ont aucun endpoint** : `ReviewCase` est créé (`review/service.py:9`) mais
   aucun routeur `review` n'est monté (`main.py:23`). Une œuvre signalée « possible copy » reste bloquée,
-  sans recours.
+  sans recours. → *Corrigé dans la PR #27, en revue* : `GET /review/cases` (paginé, filtre `status`) et
+  `POST /review/cases/{id}/decision` (`cleared` | `confirmed`, réservés aux reviewers). `cleared` laisse
+  le même artiste republier le même fichier (même SHA-256). Un fichier refusé renvoyé réutilise le cas
+  ouvert (une partie du point 4). Migration `0016`. ruff OK, pytest 159 passed / 2 skipped.
+  Reste : relier le cas levé à l'œuvre publiée ensuite ; aucune interface web pour ces routes.
 - [ ] **17. Index de similarité jamais purgé** (`scan/index.py:52`) : il ne fait qu'ajouter, et chaque
   processus garde sa propre copie (incohérence entre instances).
 
