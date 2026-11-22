@@ -15,3 +15,12 @@ def mp4(seconds: float = 2, size: str = "1920x1080", rate: int = 10, source: str
         subprocess.run(args, check=True, timeout=60)  # noqa: S603 S607 fixed arguments, ffmpeg found on PATH
         return out.read_bytes()
 
+
+
+def audio_only_mp4() -> bytes:
+    """An MP4 holding one second of sound and no video stream."""
+    with tempfile.TemporaryDirectory() as workdir:
+        out = Path(workdir) / "a.mp4"
+        args = ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac", str(out)]
+        subprocess.run(args, check=True, timeout=60)  # noqa: S603 S607 fixed arguments, ffmpeg found on PATH
+        return out.read_bytes()

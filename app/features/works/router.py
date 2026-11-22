@@ -12,6 +12,7 @@ from app.features.works.proofs import PUBLIC, REVIEWERS, proof_url
 from app.features.works.queries import load_work, search_works, works_query
 from app.features.works.schemas import Category, ProofClaimIn, ProofOut, WorkOut
 from app.platform import signed_links, storage
+from app.platform.ai_detection import AiCheck
 from app.platform.auth import OptionalUser, User
 from app.platform.config import get_settings
 from app.platform.db import Db
@@ -62,6 +63,7 @@ async def read_work(work_id: uuid.UUID, db: Db, viewer: OptionalUser) -> WorkOut
 async def create_work(
     user: User,
     db: Db,
+    ai_detector: AiCheck,
     title: Annotated[str, Form(min_length=1, max_length=200)],
     category: Annotated[CategoryId, Form()],
     file: Annotated[UploadFile, File()],
@@ -79,7 +81,7 @@ async def create_work(
         ai_declared=ai_declared, exposition_id=exposition_id, file=file, proof=proof or [],
         proof_visibility=proof_visibility,
         proof_claims=parse_claims(proof_claims),
-        model_hd=model_hd, poster=poster,
+        model_hd=model_hd, poster=poster, ai_detector=ai_detector,
     )
     return await load_work(db, work.id, user)
 

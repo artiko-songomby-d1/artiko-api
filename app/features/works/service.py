@@ -13,6 +13,7 @@ from app.features.works.checks import Candidate, ProofClaim, run_publish_checks,
 from app.features.works.models import Exposition, Work, WorkProof
 from app.features.works.proofs import PUBLIC, REVIEWERS
 from app.platform import storage
+from app.platform.ai_detection import AiDetector
 from app.platform.auth import CurrentUser
 from app.platform.config import get_settings
 from app.platform.db import Db
@@ -40,6 +41,7 @@ async def publish_work(
     proof_claims: list[ProofClaim | None] | None = None,
     model_hd: UploadFile | None = None,
     poster: UploadFile | None = None,
+    ai_detector: AiDetector,
 ) -> Work:
     artist = await db.scalar(select(Artist).where(Artist.user_id == user.id))
     if artist is None:
@@ -57,6 +59,7 @@ async def publish_work(
     fingerprint = storage.sha256(data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
         raise Conflict("duplicate_work", "This exact file is already published on Artiko")
+    await ai_detector.check_main_file(data, kind, ext, ai_declared)
     embedding = (await run_in_threadpool(embed, data)).tolist() if kind == "image" else None
     image_hash = await run_in_threadpool(phash, data) if kind == "image" else None
     earlier = await run_publish_checks(db, Candidate(artist.id, fingerprint, kind, embedding, image_hash))
