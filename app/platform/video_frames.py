@@ -72,7 +72,8 @@ class VideoFrames:
     async def extract(self, video: bytes) -> list[bytes]:
         """One JPEG at 30, 50 and 70 % of the duration, the first frame for a position that has none, each once.
 
-        Raises UnreadableVideo or ToolUnavailable. The private directory holding the file is removed in every case.
+        Raises UnreadableVideo when the file itself is at fault; ToolUnavailable or ProcessTimedOut when a tool is.
+        The private directory holding the file is removed in every case.
         """
         with tempfile.TemporaryDirectory(prefix="artiko-video-") as workdir:  # created with mode 0700
             source = Path(workdir) / "input.mp4"
@@ -88,10 +89,7 @@ class VideoFrames:
     async def _duration(self, source: Path) -> float:
         args = [self._ffprobe, "-v", "error", *INPUT_GUARD, "-select_streams", "v:0", "-show_entries", PROBE_ENTRIES]
         args += ["-of", "default=noprint_wrappers=1"]
-        try:
-            code, stdout = await self._runner.run([*args, str(source)])
-        except ProcessTimedOut as e:
-            raise UnreadableVideo("probe timed out") from e
+        code, stdout = await self._runner.run([*args, str(source)])
         if code != 0:
             raise UnreadableVideo("probe failed")
         return _duration_of(stdout.decode(errors="replace"))
@@ -110,10 +108,7 @@ class VideoFrames:
         output = source.with_name(f"frame-{position}.jpg")
         args = [self._ffmpeg, "-v", "error", "-y", *INPUT_GUARD, "-ss", position, "-i", str(source)]
         args += ["-frames:v", "1", "-an", "-vf", f"scale='min({MAX_FRAME_WIDTH},iw)':-2", "-q:v", "3"]
-        try:
-            code, _ = await self._runner.run([*args, "-f", "image2", "-c:v", "mjpeg", str(output)])
-        except ProcessTimedOut:
-            return None
+        code, _ = await self._runner.run([*args, "-f", "image2", "-c:v", "mjpeg", str(output)])
         # Past the last frame, ffmpeg 5 exits 0 without writing anything and ffmpeg 7 exits with an error.
         if code != 0 or not output.is_file():
             return None

@@ -117,6 +117,33 @@ def test_missing_ffmpeg_is_fail_open(caplog):
     assert fake.requests == []
 
 
+def tool(tmp_path, name: str, body: str) -> str:
+    """A stand-in for ffprobe or ffmpeg: a shell script that ignores its arguments."""
+    path = tmp_path / name
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o700)
+    return str(path)
+
+
+@pytest.mark.parametrize("hanging", ["ffprobe", "ffmpeg"])
+def test_a_tool_killed_at_its_timeout_accepts_the_video(hanging, tmp_path, caplog):
+    fake = FakeSightengine(0.99)
+    frames = VideoFrames(ProcessRunner(timeout_seconds=0.3), **{hanging: tool(tmp_path, hanging, "exec sleep 30")})
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", ai_declared=False))
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "AI detection skipped (video file): ffmpeg or ffprobe timed out")
+    ]
+    assert fake.requests == []
+
+
+def test_a_probe_that_fails_quickly_refuses_the_video(tmp_path):
+    frames = VideoFrames(ProcessRunner(), ffprobe=tool(tmp_path, "ffprobe", "exit 1"))
+    with pytest.raises(BadRequest) as error:
+        asyncio.run(detector(FakeSightengine(0.1), frames).check_main_file(VIDEO, "video", ".mp4", False))
+    assert error.value.code == "unreadable_video"
+
+
 class BlockedFrames:
     """Frame extraction that waits until released, counting the checks that reached it."""
 

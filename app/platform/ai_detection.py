@@ -18,7 +18,7 @@ from app.platform import storage
 from app.platform.config import get_settings
 from app.platform.errors import BadRequest
 from app.platform.sightengine import REQUEST_SPACING_SECONDS, Credentials, RequestSpacer, Sightengine
-from app.platform.video_frames import ProcessRunner, ToolUnavailable, UnreadableVideo, VideoFrames
+from app.platform.video_frames import ProcessRunner, ProcessTimedOut, ToolUnavailable, UnreadableVideo, VideoFrames
 
 log = logging.getLogger("artiko.ai_detection")
 
@@ -79,6 +79,8 @@ class AiDetector:
                 raise BadRequest("unreadable_video", message, details=FILE_FIELD) from e
             except ToolUnavailable:
                 log.error("AI detection skipped (video file): ffmpeg or ffprobe cannot be started")
+            except ProcessTimedOut:
+                log.warning("AI detection skipped (video file): ffmpeg or ffprobe timed out")
             except TimeoutError:
                 log.warning("AI detection stopped (video file): over %d s", VIDEO_CHECK_SECONDS)
         return max(scores, default=None)
