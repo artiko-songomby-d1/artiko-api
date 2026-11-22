@@ -73,9 +73,9 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 
 ## 🟡 Architecture / dette
 
-- [ ] **18. Détection pHash en scan complet** : chaque publication charge le pHash de toutes les œuvres
-  et compare en Python (`integrity/service.py:49`). → Requête SQL / index dès que le volume grandit,
-  comme prévu pour CLIP (`scan/index.py:3`).
+- [x] **18. Détection pHash en scan complet** : PostgreSQL calcule la distance exacte et renvoie
+  les meilleures correspondances par groupe. Quatre index filtrent les candidats pour les seuils
+  jusqu'à 11 bits, dont le seuil par défaut de 8. Les seuils supérieurs gardent le calcul SQL exact.
 - [x] **19. `refresh` de l'index à chaque scan** : délai par processus configurable via
   `SCAN_INDEX_REFRESH_SECONDS` (15 s par défaut). Une publication invalide l'index local après validation
   de la transaction. Le contrôle des doublons continue d'actualiser l'index avant la comparaison.
