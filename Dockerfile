@@ -1,7 +1,7 @@
 # Base images are pinned by digest, so a rebuild cannot silently pull different content. The tag stays in front
 # of the digest for readers and for Dependabot (docker ecosystem), which bumps tag and digest together.
 FROM ghcr.io/astral-sh/uv:0.11.28@sha256:0f36cb9361a3346885ca3677e3767016687b5a170c1a6b88465ec14aefec90aa AS uv
-FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 COPY --from=uv /uv /bin/uv
 WORKDIR /app
