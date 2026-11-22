@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.platform.db import Base
@@ -15,7 +15,16 @@ class ReviewCase(Base):
     """Something a reviewer has to look at: a possible copy, and later reports."""
 
     __tablename__ = "review_case"
-    __table_args__ = (Index("ix_review_case_artist_candidate", "artist_id", "candidate_sha256"),)
+    __table_args__ = (
+        Index("ix_review_case_artist_candidate", "artist_id", "candidate_sha256"),
+        Index(
+            "uq_review_case_open_possible_copy",
+            "artist_id",
+            "candidate_sha256",
+            unique=True,
+            postgresql_where=text("status = 'open' AND reason = 'possible_copy'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     reason: Mapped[str] = mapped_column(String(30), index=True)

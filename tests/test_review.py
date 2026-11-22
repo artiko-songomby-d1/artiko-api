@@ -1,3 +1,6 @@
+import asyncio
+
+import httpx
 from sqlalchemy import create_engine, text
 
 from app.platform.config import get_settings
@@ -88,6 +91,27 @@ def test_a_confirmed_copy_stays_refused(client, reviewer):
     decided = decide(client, case_id, "confirmed", reviewer)
     assert decided.status_code == 200 and decided.json()["status"] == "confirmed"
     assert post_work(client, "bob", copy).status_code == 409
+
+
+def test_concurrent_refusals_of_one_file_open_a_single_case(client):
+    copy, case_id = refuse_copy(client)
+    execute("DELETE FROM app.review_case")
+
+    async def refuse_all() -> list[httpx.Response]:
+        from app.main import app
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as concurrent:
+            files = [("file", ("work.img", copy, "image/png"))]
+            form = {"title": "Study", "category": "painting"}
+            return await asyncio.gather(
+                *(concurrent.post("/api/v1/works", data=form, files=files, headers=auth("bob")) for _ in range(10))
+            )
+
+    responses = asyncio.run(refuse_all())
+    assert {r.status_code for r in responses} == {409}
+    assert len({r.json()["error"]["case_id"] for r in responses}) == 1
+    assert count("SELECT count(*) FROM app.review_case") == 1
 
 
 def test_resending_a_confirmed_copy_reuses_its_case(client, reviewer):

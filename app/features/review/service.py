@@ -2,7 +2,8 @@
 
 import uuid
 
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, and_, case, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 
 from app.features.review.models import CLEARED, CONFIRMED, OPEN, ReviewCase
 from app.platform.db import Db
@@ -10,6 +11,7 @@ from app.platform.errors import Conflict, NotFound
 from app.platform.pagination import Page
 
 POSSIBLE_COPY = "possible_copy"
+_DECISION_PRECEDENCE = case({CONFIRMED: 0, OPEN: 1}, value=ReviewCase.status, else_=2)
 
 
 async def open_possible_copy(
@@ -24,26 +26,46 @@ async def open_possible_copy(
 ) -> ReviewCase:
     """The confirmed or open case for this artist and file, or a new one: retrying a refused file does not pile up
     cases, and a confirmed copy never gets a fresh case a reviewer could clear."""
-    existing = await db.scalar(
-        select(ReviewCase)
-        .where(*_same_file(artist_id, candidate_sha256), ReviewCase.status.in_((CONFIRMED, OPEN)))
-        .order_by(ReviewCase.status == OPEN)
-        .limit(1)
-    )
+    existing = await _existing_case(db, artist_id, candidate_sha256, ReviewCase.status.in_((CONFIRMED, OPEN)))
     if existing is not None:
         return existing
-    case = ReviewCase(
-        reason=POSSIBLE_COPY,
-        artist_id=artist_id,
-        candidate_sha256=candidate_sha256,
-        other_work_id=other_work_id,
-        known_work_id=known_work_id,
-        score=score,
-        signal=signal,
+    # The partial unique index allows one open case per artist and file: a concurrent refusal of the same file
+    # inserts nothing here and its case is read back instead.
+    opened = await db.scalar(
+        insert(ReviewCase)
+        .values(
+            reason=POSSIBLE_COPY,
+            artist_id=artist_id,
+            candidate_sha256=candidate_sha256,
+            other_work_id=other_work_id,
+            known_work_id=known_work_id,
+            score=score,
+            signal=signal,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[ReviewCase.artist_id, ReviewCase.candidate_sha256],
+            index_where=and_(ReviewCase.status == OPEN, ReviewCase.reason == POSSIBLE_COPY),
+        )
+        .returning(ReviewCase)
     )
-    db.add(case)
     await db.commit()
-    return case
+    if opened is not None:
+        return opened
+    concurrent = await _existing_case(db, artist_id, candidate_sha256)
+    if concurrent is None:
+        raise RuntimeError("the review case that blocked the insert has disappeared")
+    return concurrent
+
+
+async def _existing_case(
+    db: Db, artist_id: uuid.UUID, candidate_sha256: str, *where: ColumnElement[bool]
+) -> ReviewCase | None:
+    return await db.scalar(
+        select(ReviewCase)
+        .where(*_same_file(artist_id, candidate_sha256), *where)
+        .order_by(_DECISION_PRECEDENCE, ReviewCase.created_at)
+        .limit(1)
+    )
 
 
 async def is_cleared(db: Db, *, artist_id: uuid.UUID, candidate_sha256: str) -> bool:
