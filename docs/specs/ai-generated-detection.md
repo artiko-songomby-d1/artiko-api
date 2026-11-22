@@ -139,15 +139,22 @@ Unit tests use `httpx.MockTransport`: no test calls the network. `tests/conftest
 | AC11 | `test_unreadable_mp4_is_refused` |
 | AC12 | `test_short_video_falls_back_to_the_first_frame` |
 | AC13 | `test_missing_ffmpeg_is_fail_open` |
-| AC14 | `test_ffmpeg_arguments_environment_and_cleanup`, `test_ffmpeg_timeout_kills_the_process`, `test_third_video_check_waits` |
+| AC14 | `test_ffmpeg_arguments_environment_and_cleanup` (environment, thread options), `test_ffmpeg_timeout_kills_the_process`, `test_video_checks_past_the_slot_count_wait` |
 | AC15 | `test_glb_audio_and_proofs_are_never_sent` |
 | AC16 | `test_every_sightengine_failure_is_fail_open` |
 | AC17 | `test_partial_frame_failure` |
 | AC18 | `test_requests_are_spaced_and_a_long_wait_is_fail_open` |
-| AC19 | `test_check_runs_after_cheap_checks_and_before_storage` |
+| AC19 | `test_check_runs_after_cheap_checks_and_before_storage` (including `invalid_proof_claims`) |
 | AC20, AC21 | `test_refusal_body_shape`, existing `test_contract.py` |
 | AC22 | `test_only_the_main_file_or_its_frames_leave` |
 | AC23 | `test_logs_hold_no_secret_bytes_or_score` (caplog) |
+| AC24 | `test_publishing_is_rate_limited_per_user_and_overall`, `test_publishing_is_not_rate_limited_when_detection_is_off`, `test_an_anonymous_publish_is_refused_before_the_rate_limit` |
+| AC25 | `test_a_hostile_answer_is_fail_open`, `test_an_answer_over_1_mib_is_not_read_to_the_end`, `test_an_answer_of_exactly_1_mib_is_read`, `test_only_a_short_plain_error_code_is_logged` |
+| AC26 | `test_the_wait_for_a_video_slot_counts_in_the_deadline`, `test_video_check_stops_at_its_deadline`, `test_one_detector_serves_one_event_loop_after_another` |
+| AC27 | `test_an_image_over_40_m_pixels_is_accepted_without_a_copy`, `test_the_pixel_cap_is_inclusive`, `test_one_shrunk_copy_is_built_at_a_time`, `test_three_frames_fit_under_the_default_memory_cap` (1080p and noisy 4K) |
+| AC28 | `test_startup_refuses_invalid_ai_detection_settings`, `test_credentials_are_trimmed_and_edge_values_are_accepted` |
+| AC29 | `test_a_tool_killed_at_its_timeout_accepts_the_video`, `test_a_probe_that_fails_quickly_refuses_the_video` |
+| AC30 | `test_a_waiter_cancelled_before_its_turn_releases_its_slot`, `test_a_slot_freed_between_two_taken_ones_is_reused` |
 
 Also: `tests/test_architecture.py` still passes; `task lint` clean. The suite uses the local database `artiko_test` (`TEST_DATABASE_URL=postgresql://artiko:artiko@127.0.0.1:5432/artiko_test`); no migration mentions pgvector.
 
