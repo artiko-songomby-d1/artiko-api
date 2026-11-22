@@ -9,14 +9,19 @@ from app.features.artists.models import Artist
 from app.features.votes.schemas import HallOfFameEntry
 from app.features.works.models import Vote, Work
 from app.features.works.queries import to_out, works_query
+from app.platform.auth import CurrentUser
+from app.platform.config import get_settings
 from app.platform.db import Db
-from app.platform.errors import BadRequest, Conflict, NotFound
+from app.platform.errors import BadRequest, Conflict, Forbidden, NotFound
 from app.platform.months import current_month
 
 HALL_OF_FAME_SIZE = 5
 
 
-async def cast_vote(db: Db, user_id: str, work_id: uuid.UUID) -> Vote:
+async def cast_vote(db: Db, user: CurrentUser, work_id: uuid.UUID) -> Vote:
+    if get_settings().require_verified_email_to_vote and not user.email_verified:
+        raise Forbidden("email_not_verified", "Verify your email address before voting")
+    user_id = user.id
     work = await db.get(Work, work_id)
     if work is None:
         raise NotFound("work_not_found", "No work with this id")

@@ -40,14 +40,19 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
   - Procédure (à faire par l'équipe, pas automatisée) : envoyer ~21 `POST /api/v1/scan/image` en moins
     d'une minute, chacun avec un `CF-Connecting-IP` forgé différent. Une réponse 429 avant la fin prouve
     que l'en-tête forgé est ignoré ; aucune 429 prouve qu'il est pris comme clé (à corriger).
-- [ ] **8. Vote sans email vérifié** : `CurrentUser` ne lit aucun claim `email_verified` (`auth.py:89`) ;
-  avec l'inscription libre côté web, comptes jetables = votes multiples.
-  - La vérification d'e-mail à l'inscription existe sur `develop` d'artiko-web (`src/lib/auth.ts`,
-    `requireEmailVerification: true`), pas encore sur son `main`.
+- [ ] **8. Vote sans email vérifié** — *partiellement corrigé (PR #29).*
+  - Fait : `CurrentUser` lit le claim `emailVerified` du jeton (`auth.py`). Avec
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=true`, `POST /votes` répond 403 `email_not_verified` si l'email du
+    votant n'est pas vérifié (`votes/service.py`). Les autres routes ne sont pas concernées.
   - Décision du 2026-11-22 : d'abord la PR #29 (refus du vote seulement, derrière
-    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=false` par défaut), à activer quand le web vérifie les e-mails en prod.
-  - PR #18 (refus de toute requête d'un compte non vérifié) passée en brouillon : à reprendre après le
-    déploiement du web, en l'adaptant à #29 (les deux touchent `auth.py`).
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=false` par défaut). La vérification d'e-mail à l'inscription existe sur
+    `develop` d'artiko-web (`src/lib/auth.ts`, `requireEmailVerification: true`), pas encore sur son `main`.
+  - Reste : le réglage vaut `false` par défaut, car le web ne vérifie pas encore les emails à
+    l'inscription : l'activer maintenant bloquerait tous les votes. → L'activer en prod (et l'ajouter à
+    `render.yaml`) quand la PR web des comptes vérifiés est fusionnée. Non vérifié sur un vrai jeton
+    Better Auth : le nom du claim vient de la PR #18 (`feat/verified-email-tokens`, passée en brouillon),
+    qui va plus loin en refusant tout jeton non vérifié ; à reprendre après le déploiement du web, en
+    l'adaptant à #29 (les deux touchent `auth.py`).
 - [ ] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé dans la PR #27, en revue.*
   - Constat : artiko-web (`src/lib/auth.ts`) n'active que les plugins `jwt`, `bearer`,
     `breachedPasswordCheck` et `nextCookies`, sans champ `role` : le JWT n'a jamais de claim `role`, donc
