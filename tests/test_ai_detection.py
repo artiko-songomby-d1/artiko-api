@@ -46,6 +46,41 @@ def test_startup_refuses_missing_credentials_or_unknown_provider(values, named):
     assert configured.ai_detection_threshold == 0.8 and configured.ai_detection_wait_seconds == 30
 
 
+CONFIGURED = {"ai_detection_provider": "sightengine", "sightengine_user": "u-12345", "sightengine_secret": "s3cr3t"}
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("ai_detection_threshold", "nan"),
+        ("ai_detection_threshold", "inf"),
+        ("ai_detection_threshold", 0),
+        ("ai_detection_threshold", -0.5),
+        ("ai_detection_threshold", 1.5),
+        ("ai_detection_wait_seconds", -5),
+        ("ai_detection_wait_seconds", "nan"),
+        ("sightengine_user", "   "),
+        ("sightengine_secret", " \t "),
+    ],
+)
+def test_startup_refuses_invalid_ai_detection_settings(variable, value):
+    with pytest.raises(ValidationError) as invalid:
+        settings(**{**CONFIGURED, variable: value})
+    assert variable in str(invalid.value).lower()
+    assert "s3cr3t" not in str(invalid.value) and "u-12345" not in str(invalid.value)
+
+
+def test_credentials_are_trimmed_and_edge_values_are_accepted():
+    configured = settings(
+        **{**CONFIGURED, "sightengine_user": " u-12345 ", "sightengine_secret": " s3cr3t\n"},
+        ai_detection_threshold=1,
+        ai_detection_wait_seconds=0,
+    )
+    assert configured.sightengine_user == "u-12345"
+    assert configured.sightengine_secret.get_secret_value() == "s3cr3t"
+    assert configured.ai_detection_threshold == 1 and configured.ai_detection_wait_seconds == 0
+
+
 def detector(fake: FakeSightengine, frames: VideoFrames | None = None) -> AiDetector:
     return AiDetector(fake.client(), frames or VideoFrames(ProcessRunner()), threshold=0.8)
 

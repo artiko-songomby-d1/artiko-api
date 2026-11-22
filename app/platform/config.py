@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -78,9 +78,14 @@ class Settings(BaseSettings):
     sightengine_user: str = ""
     sightengine_secret: SecretStr = SecretStr("")
     # A main file whose AI score (the highest frame score of a video) reaches this is refused.
-    ai_detection_threshold: float = 0.8
+    ai_detection_threshold: float = Field(0.8, gt=0, le=1, allow_inf_nan=False)
     # Longest wait for a turn at Sightengine (1 request per second on the free plan) before the file is accepted.
-    ai_detection_wait_seconds: float = 30
+    ai_detection_wait_seconds: float = Field(30, ge=0, allow_inf_nan=False)
+
+    @field_validator("sightengine_user", "sightengine_secret", mode="before")
+    @classmethod
+    def _trimmed(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def _ai_detection_has_credentials(self) -> Self:
