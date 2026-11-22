@@ -48,6 +48,7 @@ Known limits of AI-generated detection:
 
 - Fail-open can be triggered on purpose: an MP4 that makes `ffmpeg` time out or fail, a queue of videos that keeps the next one waiting past 60 s, a PNG over 12 MB and over 20,000,000 pixels, or a spent daily quota all get a work published unchecked.
 - The shrunk copy of an image over 12 MB is a JPEG, so the transparency of a PNG or WebP is lost in what Sightengine sees (images over 12 MB only; the original is stored unchanged).
+- Uploads are accepted up to 60 MB (`MAX_UPLOAD_MB`, raised from 20 MB for the demo). Memory warning: the whole upload is read into RAM as one `bytes` object (about 60 MB per request, and parallel uploads add up), and a 60 MB MP4 also runs `ffmpeg` under its 272 MiB cap: roughly 330 MB at the peak of a single video check, on top of the CLIP model, on a 512 MB instance. The footprint of the CLIP model and the real peak were not measured. A big video can also exceed the ffmpeg cap or the 60 s limit and then be accepted unchecked. Lower `MAX_UPLOAD_MB` (for example to 40 or back to 20) if the instance runs out of memory.
 - `ffmpeg` and the app run as root in the Docker image.
 - The `ffmpeg` version is not pinned (whatever Debian ships with `python:3.14-slim`). The 272 MiB memory cap was measured with Debian 13's ffmpeg 7.1; it is unverified with the 5.1.9 of the development machine and with any later build.
 

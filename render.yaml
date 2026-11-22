@@ -33,6 +33,8 @@ services:
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
+      - key: MAX_UPLOAD_MB
+        value: "60"
       - key: AI_DETECTION_PROVIDER
         sync: false
       - key: SIGHTENGINE_USER

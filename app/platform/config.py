@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     # Public base URL of this API, used to build absolute media links for the apps.
     public_api_url: str = "http://localhost:8000"
-    max_upload_mb: int = 20
+    max_upload_mb: int = 60
     # Secret that signs the short-lived links to reviewer-only proof files. Empty = no private link is issued.
     proof_url_secret: str = ""
     proof_url_ttl_seconds: int = 300

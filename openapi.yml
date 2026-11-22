@@ -164,7 +164,7 @@ paths:
         artist's work or a known work (CLIP similarity or perceptual hash) is refused with 409 `possible_copy`
         and the id of the review case; one that looks like the artist's own earlier work is accepted and the two
         works share a `series_id`.
-        Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
+        Files: up to 60 MB each (`MAX_UPLOAD_MB`); images (jpeg, png, webp), audio (mpeg, wav, ogg),
         video (mp4, webm), 3D (glb).
         When AI detection is on and `ai_declared` is false, the main image, or 3 frames of the main MP4, are sent
         to Sightengine before anything is stored; a file it finds AI-generated is refused with 400

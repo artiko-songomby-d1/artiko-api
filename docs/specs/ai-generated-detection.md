@@ -89,7 +89,7 @@ As the Artiko team, I want undeclared AI-generated images and videos refused at 
 | False positive on a human-made work | Refused (AC5) if its score is 0.8 or more. There is no contest path (no review queue, by decision). The 0.8 threshold makes this rarer but not impossible. The artist can still publish by declaring the work as AI (`ai_declared`), which gives it no `human_proven`, as today. |
 | Score between 0.5 and 0.8 | Accepted (AC6). A work that is probably AI but not certain gets through. Accepted by decision. |
 | Screenshot or photo of an AI image | Whatever Sightengine scores. Unverified. |
-| Image between 12 MB and 20 MB | A shrunk copy is checked (AC8). The API accepts up to 20 MB (`max_upload_mb`, `app/platform/config.py`). |
+| Image between 12 MB and 60 MB | A shrunk copy is checked (AC8). The API accepts up to 60 MB (`max_upload_mb`, `app/platform/config.py`; 20 MB until the demo change). |
 | Free quota spent (500 a day, 2,000 a month) | `usage_limit`: accepted unchecked (AC16) until the quota resets. |
 | Video where only some frames look AI | Refused when the highest frame reaches the threshold (AC9). Observed: one frame at 0.001, one at 0.99, one at 0.68: refused because of the 0.99 frame. Without it, 0.68 alone would be accepted. |
 | Many MP4 publishes at once | Each MP4 needs 3 Sightengine requests, 1.1 s apart, so about 54 requests a minute fit. Past that, requests wait up to 30 s and the excess is accepted unchecked (fail-open, by decision). The AC24 limits make this rare. |
