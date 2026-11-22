@@ -159,8 +159,10 @@ paths:
       tags: [works]
       summary: Publish a work with its proof of process (artists only)
       description: |
-        The work is `human_proven` when it has at least 2 proof files and is not declared
-        AI-assisted. The same file (SHA-256) cannot be published twice. An image that looks like another
+        The work is `human_proven` when it has at least 2 proof files that count and is not declared
+        AI-assisted. A proof counts only when it differs from every file of the work and from the other
+        proofs counted (same SHA-256, or for images the same picture resized or recompressed, do not count
+        twice); such a file is still stored. The same file (SHA-256) cannot be published twice. An image that looks like another
         artist's work or a known work (CLIP similarity or perceptual hash) is refused with 409 `possible_copy`
         and the id of the review case; one that looks like the artist's own earlier work is accepted and the two
         works share a `series_id`.

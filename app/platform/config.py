@@ -38,8 +38,9 @@ class Settings(BaseSettings):
     scan_rate_limit_per_minute: int = 20
     # All clients together: the CLIP model is the bottleneck, so a client rotating IPs still cannot exceed this.
     scan_global_rate_limit_per_minute: int = 120
-    # Header the hosting proxy overwrites with the client IP (e.g. x-real-ip). Empty = the socket peer.
-    # Never name a header a client can send itself, or the rate limit can be dodged.
+    # Header the hosting proxy overwrites with the client IP. Empty = the socket peer. On Render it is
+    # CF-Connecting-IP (see render.yaml): Cloudflare refuses a request that already carries it.
+    # Never name a header a client can send itself (X-Forwarded-For), or the rate limit can be dodged.
     client_ip_header: str = ""
 
     models_dir: str = "models"

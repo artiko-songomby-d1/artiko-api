@@ -114,6 +114,27 @@ def png(seed: int, size: tuple[int, int] = (64, 48)) -> bytes:
     return buf.getvalue()
 
 
+def sketch(seed: int, size: int = 96) -> bytes:
+    """A small drawing, distinct per seed. Unlike `png`, a flat colour, two sketches also look different to the
+    perceptual hash, which proof files must do to count for the badge."""
+    import io
+    import random
+
+    from PIL import Image, ImageDraw
+
+    rnd = random.Random(seed)  # noqa: S311 - a reproducible picture, not a secret
+    img = Image.new("RGB", (size, size), tuple(rnd.randint(30, 220) for _ in range(3)))
+    draw = ImageDraw.Draw(img)
+    for _ in range(10):
+        x, y = rnd.randint(-10, size), rnd.randint(-10, size)
+        r = rnd.randint(size // 8, size // 2)
+        shape = draw.ellipse if rnd.random() < 0.5 else draw.rectangle
+        shape((x, y, x + r, y + r), fill=tuple(rnd.randint(0, 255) for _ in range(3)))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def become_artist(client, user_id: str, name: str = "Rova Arts") -> str:
     r = client.put("/api/v1/me/artist", json={"display_name": name}, headers=auth(user_id))
     return r.json()["id"]
@@ -160,7 +181,7 @@ def signed_claim(device_id: str, key, data: bytes, draft_id: str = "draft-1", no
 def publish(client, user_id: str, seed: int, proofs: int = 2, signed: bool = True, **form) -> dict:
     """Publish a work with `proofs` proof files: signed in-app captures by default, or imported ones."""
     files = [("file", (f"w{seed}.png", png(seed), "image/png"))]
-    proof_bytes = [png(1000 + seed * 10 + i) for i in range(proofs)]
+    proof_bytes = [sketch(1000 + seed * 10 + i) for i in range(proofs)]
     files += [("proof", (f"p{seed}-{i}.png", data, "image/png")) for i, data in enumerate(proof_bytes)]
     data = {"title": f"Work {seed}", "category": "painting", **form}
     if proofs:

@@ -66,15 +66,34 @@ def normalise(address: str) -> str:
     except ValueError:
         return address
     if ip.version == 6:
+        # An IPv4 client written as ::ffff:a.b.c.d is that IPv4 client: its /64 would be "::" for everybody.
+        if ip.ipv4_mapped:
+            return str(ip.ipv4_mapped)
         return str(ipaddress.ip_network(f"{ip}/{IPV6_PREFIX}", strict=False).network_address)
     return str(ip)
 
 
+def _address(value: str) -> str | None:
+    """The client key for `value` when it is one IP address, else None."""
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return None
+    return normalise(value)
+
+
 def client_key(request: Request) -> str:
-    """The caller's address: the header named by CLIENT_IP_HEADER (one the proxy overwrites), else the socket peer."""
+    """The caller's address: the header named by CLIENT_IP_HEADER (one the proxy overwrites), else the socket peer.
+
+    The header counts only when it holds an IP address. Anything else (a port, a name, a made-up value, a missing
+    header) falls back to the socket peer: behind a proxy that is one counter shared by everybody, never a key
+    the caller chose."""
     header = get_settings().client_ip_header
     if header and (value := request.headers.get(header)):
-        return normalise(value.split(",")[-1].strip())
+        # In a comma-separated list the last element is the one the nearest proxy wrote.
+        key = _address(value.split(",")[-1].strip())
+        if key:
+            return key
     return normalise(request.client.host) if request.client else "unknown"
 
 
