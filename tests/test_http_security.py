@@ -1,4 +1,4 @@
-from tests.conftest import become_artist, publish
+from tests.conftest import auth, become_artist, publish
 
 
 def test_api_responses_carry_security_headers(client):
@@ -46,3 +46,21 @@ def test_cors_allows_only_the_methods_and_headers_the_api_uses(client):
         },
     )
     assert r.status_code == 400
+
+
+def test_cors_allows_bearer_auth_without_credentialed_requests(client):
+    origin = "http://localhost:3000"
+    preflight = client.options(
+        "/api/v1/me",
+        headers={"Origin": origin, "Access-Control-Request-Method": "GET",
+                 "Access-Control-Request-Headers": "Authorization"},
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["Access-Control-Allow-Origin"] == origin
+    assert "Authorization" in preflight.headers["Access-Control-Allow-Headers"]
+    assert "Access-Control-Allow-Credentials" not in preflight.headers
+
+    response = client.get("/api/v1/me", headers={"Origin": origin, **auth("alice")})
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == origin
+    assert "Access-Control-Allow-Credentials" not in response.headers

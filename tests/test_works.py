@@ -1,3 +1,5 @@
+import pytest
+
 from tests.conftest import auth, become_artist, png, publish
 
 
@@ -86,3 +88,30 @@ def test_a_real_wav_is_accepted(client):
     files = [("file", ("a.wav", wav, "audio/wav"))]
     r = client.post("/api/v1/works", data={"title": "T", "category": "music"}, files=files, headers=auth("alice"))
     assert r.status_code == 201 and r.json()["media_kind"] == "audio"
+
+
+def jpeg(seed: int) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), ((seed * 29) % 256, 120, 60)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("main", "ext", "content_type"),
+    [
+        (("w.glb", b"glTF\x02\x00\x00\x00" + b"\x00" * 12, "model/gltf-binary"), ".glb", "model/gltf-binary"),
+        (("w.png", png(1), "image/png"), ".png", "image/png"),
+    ],
+)
+def test_the_main_file_keeps_its_extension_when_proofs_are_attached(client, main, ext, content_type):
+    become_artist(client, "alice")
+    files = [("file", main), ("proof", ("p.jpg", jpeg(1), "image/jpeg"))]
+    data = {"title": "T", "category": "sculpture", "proof_claims": '[{"source": "imported"}]'}
+    work = client.post("/api/v1/works", data=data, files=files, headers=auth("alice")).json()
+    assert work["media_url"].endswith(ext)
+    r = client.get("/" + work["media_url"].split("/", 3)[3])
+    assert r.status_code == 200 and r.content == main[1] and r.headers["content-type"] == content_type

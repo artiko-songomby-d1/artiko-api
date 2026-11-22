@@ -18,6 +18,7 @@ limiter = SlidingWindowLimiter()
     "/image",
     dependencies=[
         limit_per_minute(
+            "image-scan",
             limiter,
             lambda: get_settings().scan_rate_limit_per_minute,
             lambda: get_settings().scan_global_rate_limit_per_minute,

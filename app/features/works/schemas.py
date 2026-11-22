@@ -54,6 +54,8 @@ class WorkOut(BaseModel):
     exposition_id: uuid.UUID | None
     series_id: uuid.UUID | None
     media_url: str
+    media_hd_url: str | None
+    poster_url: str | None
     media_kind: Literal["image", "audio", "video", "model"]
     proof_urls: list[str]
     sha256: str

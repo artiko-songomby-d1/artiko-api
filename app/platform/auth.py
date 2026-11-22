@@ -1,6 +1,7 @@
 """Verify the Better Auth JWTs (issued by artiko-web) against its JWKS endpoint."""
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -14,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.platform.config import get_settings
 from app.platform.errors import Forbidden, Unauthorized
 
+log = logging.getLogger(__name__)
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -84,8 +86,10 @@ async def decode_token(token: str) -> CurrentUser:
             audience=s.auth_audience,
             options={"require": ["sub", "exp"]},
         )
-    except jwt.PyJWTError as e:
-        raise Unauthorized("invalid_token", f"Invalid token: {e}") from e
+    except jwt.PyJWTError as error:
+        # Exception messages may contain token-controlled data, such as the signing key ID.
+        log.debug("JWT validation failed (%s)", type(error).__name__)
+        raise Unauthorized("invalid_token", "Invalid token") from error
     # Better Auth copies the user into the token; the web refuses unverified sign-ins, and this keeps
     # a token minted any other way (an older session, a bearer exchange) from acting for an unproven address.
     if claims.get("emailVerified") is not True:

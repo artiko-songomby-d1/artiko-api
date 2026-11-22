@@ -1,4 +1,4 @@
-"""Checks that run before a work is saved. Other features register theirs; works never imports them."""
+"""Publication checks and hooks registered by other features."""
 
 import uuid
 from collections.abc import Awaitable, Callable
@@ -34,6 +34,19 @@ async def run_publish_checks(db: Db, candidate: Candidate) -> uuid.UUID | None:
     for check in _checks:
         earlier = await check(db, candidate) or earlier
     return earlier
+
+
+_image_publish_hooks: list[Callable[[], None]] = []
+
+
+def register_image_publish_hook(hook: Callable[[], None]) -> None:
+    if hook not in _image_publish_hooks:
+        _image_publish_hooks.append(hook)
+
+
+def notify_image_published() -> None:
+    for hook in _image_publish_hooks:
+        hook()
 
 
 @dataclass(frozen=True)

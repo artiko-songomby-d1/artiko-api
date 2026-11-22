@@ -2,7 +2,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 from app.platform import signed_links, storage
-from tests.conftest import auth, become_artist, make_token, png, publish
+from tests.conftest import auth, become_artist, make_token, publish, sketch
 
 
 def reviewer(user_id: str = "rev") -> dict[str, str]:
@@ -11,7 +11,7 @@ def reviewer(user_id: str = "rev") -> dict[str, str]:
 
 def proof_name(seed: int, index: int) -> str:
     """The stored name of the index-th proof that `publish` sends for this seed."""
-    return f"{storage.sha256(png(1000 + seed * 10 + index))}.png"
+    return f"{storage.sha256(sketch(1000 + seed * 10 + index))}.png"
 
 
 def path_of(url: str) -> str:
@@ -34,7 +34,7 @@ def test_the_owner_opens_a_private_proof_through_a_signed_link(client):
     seen = client.get(f"/api/v1/works/{work['id']}", headers=auth("alice")).json()["proof_urls"]
     assert len(seen) == 2
     r = client.get(path_of(seen[0]))
-    assert r.status_code == 200 and r.content == png(1010)
+    assert r.status_code == 200 and r.content == sketch(1010)
     assert r.headers["cache-control"] == "private, no-store"
 
 

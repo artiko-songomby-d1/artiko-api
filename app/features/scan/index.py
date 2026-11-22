@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
+from time import monotonic
 
 import numpy as np
 from sqlalchemy import func, select
@@ -40,33 +41,58 @@ class _Matrix:
 
 class Index:
     def __init__(self) -> None:
-        self.reset()
+        self._refresh_generation = 0
         self._lock = asyncio.Lock()
+        self.reset()
 
     def reset(self) -> None:
         self.works, self.known = _Matrix(), _Matrix()
         self.owners: dict[uuid.UUID, uuid.UUID] = {}
         self.works_since: datetime | None = None
         self.known_count = -1
+        self.invalidate()
 
-    async def refresh(self, db: AsyncSession) -> None:
-        """Append works published since the last scan; reload known works if their count changed."""
+    def invalidate(self) -> None:
+        self._refresh_generation += 1
+        self._refreshed_at: float | None = None
+
+    def _is_fresh(self, max_age_seconds: int) -> bool:
+        refreshed_at = self._refreshed_at
+        return max_age_seconds > 0 and refreshed_at is not None and monotonic() - refreshed_at < max_age_seconds
+
+    async def refresh(self, db: AsyncSession, *, max_age_seconds: int = 0) -> None:
+        """Append new works and reload known works when their count changes."""
+        if self._is_fresh(max_age_seconds):
+            return
         async with self._lock:
+            if self._is_fresh(max_age_seconds):
+                return
+            generation = self._refresh_generation
+
             q = select(Work.id, Work.embedding, Work.created_at, Work.artist_id).where(Work.embedding.is_not(None))
             if self.works_since:  # >= because two works can share a timestamp
                 q = q.where(Work.created_at >= self.works_since)
             rows = (await db.execute(q.order_by(Work.created_at))).all()
+            count = await db.scalar(select(func.count(KnownWork.id)))
+            known = None
+            if count != self.known_count:
+                known = _Matrix()
+                known_rows = (await db.execute(select(KnownWork.id, KnownWork.embedding))).all()
+                known.extend([(row[0], row[1]) for row in known_rows])
+
+            # A scan can use the previous snapshot while an unthrottled refresh awaits SQL.
             seen = set(self.works.ids)
             self.works.extend([(r[0], r[1]) for r in rows if r[0] not in seen])
             self.owners.update({r[0]: r[3] for r in rows})
             if rows:
                 self.works_since = rows[-1][2]
-
-            count = await db.scalar(select(func.count(KnownWork.id)))
-            if count != self.known_count:
-                self.known = _Matrix()
-                self.known.extend([tuple(r) for r in await db.execute(select(KnownWork.id, KnownWork.embedding))])
+            if known is not None:
+                self.known = known
                 self.known_count = count
+
+            # An image committed during these queries may be missing from their results.
+            if generation == self._refresh_generation:
+                self._refreshed_at = monotonic()
 
     def search(self, vec: np.ndarray) -> tuple[str | None, uuid.UUID | None, float]:
         """("work" | "known" | None, id, cosine similarity) of the closest image."""
@@ -90,3 +116,7 @@ class Index:
 @lru_cache
 def get_index() -> Index:
     return Index()
+
+
+def invalidate_index() -> None:
+    get_index().invalidate()

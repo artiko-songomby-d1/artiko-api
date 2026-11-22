@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import NonNegativeInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,13 +39,18 @@ class Settings(BaseSettings):
     scan_rate_limit_per_minute: int = 20
     # All clients together: the CLIP model is the bottleneck, so a client rotating IPs still cannot exceed this.
     scan_global_rate_limit_per_minute: int = 120
-    # Header the hosting proxy overwrites with the client IP (e.g. x-real-ip). Empty = the socket peer.
-    # Never name a header a client can send itself, or the rate limit can be dodged.
+    # Header the hosting proxy overwrites with the client IP. Empty = the socket peer. On Render it is
+    # CF-Connecting-IP (see render.yaml): Cloudflare refuses a request that already carries it.
+    # Never name a header a client can send itself (X-Forwarded-For), or the rate limit can be dodged.
     client_ip_header: str = ""
+    # All API instances share rate limits when they use the same Redis URL.
+    rate_limit_redis_url: str = ""
 
     models_dir: str = "models"
     # Cosine similarity above which a scanned photo is the same work (CLIP ViT-B/32).
     scan_match_threshold: float = 0.85
+    # Seconds before a scan checks the database for index updates again. Zero refreshes every scan.
+    scan_index_refresh_seconds: NonNegativeInt = 15
     # Where the web app lives (links in scan sources).
     public_web_url: str = "http://localhost:3000"
     # Publishing is refused when the image is this similar (CLIP cosine) to another artist's work or a known work.
