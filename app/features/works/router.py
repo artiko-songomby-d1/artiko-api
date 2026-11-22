@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, Query, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import TypeAdapter, ValidationError
 
 from app.features.works import service
@@ -12,14 +13,14 @@ from app.features.works.proofs import PUBLIC, REVIEWERS, proof_url
 from app.features.works.queries import load_work, search_works, works_query
 from app.features.works.schemas import Category, ProofClaimIn, ProofOut, WorkOut
 from app.platform import signed_links, storage
-from app.platform.ai_detection import AiCheck
+from app.platform.ai_detection import AiBudget, AiCheck
 from app.platform.auth import OptionalUser, User
 from app.platform.config import get_settings
 from app.platform.db import Db
 from app.platform.errors import BadRequest, Forbidden, NotFound
 from app.platform.months import MONTH
 from app.platform.pagination import Paged
-from app.platform.rate_limit import SlidingWindowLimiter, limit_per_minute
+from app.platform.rate_limit import SlidingWindowLimiter, limit_per_minute, user_key
 
 router = APIRouter(tags=["works"])
 claims_adapter = TypeAdapter(list[ProofClaimIn])
@@ -34,6 +35,7 @@ def parse_claims(raw: str | None) -> list[ProofClaim | None] | None:
     except ValidationError as e:
         raise BadRequest("invalid_proof_claims", "proof_claims must be a JSON list of valid claims") from e
 proof_limiter = SlidingWindowLimiter()
+work_limiter = SlidingWindowLimiter()
 
 
 @router.get("/categories")
@@ -59,11 +61,24 @@ async def read_work(work_id: uuid.UUID, db: Db, viewer: OptionalUser) -> WorkOut
     return await load_work(db, work_id, viewer)
 
 
-@router.post("/works", status_code=201)
+@router.post(
+    "/works",
+    status_code=201,
+    dependencies=[
+        limit_per_minute(
+            "works",
+            work_limiter,
+            lambda: get_settings().work_rate_limit_per_minute,
+            lambda: get_settings().work_global_rate_limit_per_minute,
+            user_key,
+        )
+    ],
+)
 async def create_work(
     user: User,
     db: Db,
     ai_detector: AiCheck,
+    check_budget: AiBudget,
     title: Annotated[str, Form(min_length=1, max_length=200)],
     category: Annotated[CategoryId, Form()],
     file: Annotated[UploadFile, File()],
@@ -82,6 +97,7 @@ async def create_work(
         proof_visibility=proof_visibility,
         proof_claims=parse_claims(proof_claims),
         model_hd=model_hd, poster=poster, ai_detector=ai_detector,
+        check_budget=check_budget,
     )
     return await load_work(db, work.id, user)
 
@@ -105,6 +121,7 @@ async def list_proofs(work_id: uuid.UUID, db: Db, user: User) -> list[ProofOut]:
     "/proofs/{proof_id}/file",
     dependencies=[
         limit_per_minute(
+            "proof-files",
             proof_limiter,
             lambda: get_settings().proof_rate_limit_per_minute,
             lambda: get_settings().proof_global_rate_limit_per_minute,
@@ -116,7 +133,8 @@ async def read_proof_file(proof_id: uuid.UUID, exp: int, sig: str, db: Db) -> Re
     if not signed_links.is_valid(str(proof_id), exp, sig):
         raise Forbidden("invalid_link", "This link is invalid or has expired")
     proof = await db.get(WorkProof, proof_id)
-    data = storage.load(proof.path, private=proof.visibility != PUBLIC) if proof else None
+    # Reading from the bucket blocks: in a worker thread, a slow download does not freeze the other requests.
+    data = await run_in_threadpool(storage.load, proof.path, private=proof.visibility != PUBLIC) if proof else None
     if proof is None or data is None:
         raise NotFound("proof_not_found", "No proof with this id")
     return Response(data, media_type=storage.content_type(proof.path), headers={"Cache-Control": "private, no-store"})

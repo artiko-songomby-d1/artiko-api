@@ -9,87 +9,130 @@ vérifiés par magic bytes (`storage.py:57`), noms de fichiers en SHA-256 filtr�
 CSP `default-src 'none'` + `nosniff` sur `/media`, liens privés signés HMAC à durée courte, rate limit
 par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 
+Relecture des correctifs le 2026-11-22 sur `develop` (`af790c5`, PR #24 et #25) : 18 à 24 corrigés, 1 et 3
+partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non lancé (`uv` absent).
+
+Correctifs suivants, même jour : 2, 4, 5, 6, 7, 10 à 15 et 17 corrigés et retirés de cette liste. Suite
+complète lancée sur l'ensemble (Postgres et disque locaux) : 266 tests réussis, 2 ignorés. Non vérifié en
+production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari iOS.
+
 ## 🔴 Sécurité / intégrité (priorité haute)
 
-- [ ] **1. Le badge « human proven » est gratuit.** `ALLOW_IMPORTED_PROOFS_FOR_BADGE=true` par défaut
-  (`config.py:64`, `works/service.py:131`) : deux fichiers importés quelconques suffisent, sans contrôle
-  qu'ils diffèrent entre eux ni du fichier de l'œuvre. Or le badge conditionne le vote
-  (`votes/service.py:23`) et le web envoie toujours des preuves importées. → Désactiver en prod, ou au
-  minimum exiger des preuves distinctes (SHA-256 / pHash) et différentes de l'œuvre.
-- [ ] **2. Vérification de l'attestation Android incomplète** (`devices/attestation.py:68`) :
-  - aucune vérification que les certificats intermédiaires sont des CA (`BasicConstraints ca=True`,
-    `keyCertSign`) : un attaquant qui possède une clé attestée légitime (son propre téléphone) pourrait
-    s'en servir comme « CA » et signer un faux leaf avec n'importe quel niveau / challenge
-    (plausible, à prouver par un test) ;
-  - pas de contrôle de la liste de révocation Google des clés d'attestation ;
-  - la présence de l'extension d'attestation sur un autre certificat que le leaf n'est pas refusée.
-- [ ] **3. Rate limit inefficace derrière Render.** `render.yaml` ne déclare pas `CLIENT_IP_HEADER`
-  (ni `PROOF_URL_SECRET`, `NONCE_SECRET`, `ATTESTATION_PROVIDER`, `ALLOW_IMPORTED_PROOFS_FOR_BADGE`).
-  Sans en-tête, `client_key` (`rate_limit.py:78`) prend l'IP du proxy Render : tous les visiteurs
-  partagent le même compteur (20 scans/min pour tout le monde). → Identifier l'en-tête fiable fourni par
-  Render (non vérifié) et compléter `render.yaml`.
-- [ ] **4. Endpoints coûteux sans rate limit** : `POST /works` (jusqu'à 6 × 20 Mo en mémoire + CLIP),
-  `POST /votes`, `PUT /me/artist`, `POST /expositions`. Chaque `POST /works` refusé pour copie crée en
-  plus un `ReviewCase` en base (`integrity/service.py:65`) → la table peut être spammée.
-- [ ] **5. Bombe de décompression d'image.** Aucune limite `Image.MAX_IMAGE_PIXELS` ni contrôle des
-  dimensions (`storage.py:43`, `embed.py:30`, `phash.py:13`). Un PNG de 5 Mo peut décoder ~89 M pixels
-  (≈ 270 Mo en RGB) : OOM probable sur l'instance Render free. → Plafonner les pixels avant
-  `convert()` / `resize()`.
-- [ ] **6. Format d'image non vérifié contre le type déclaré** : `is_image` accepte tout ce que Pillow
-  sait ouvrir (GIF, BMP, TIFF…) puis le stocke en `.png` / `.jpg` (`storage.py:67`). → Comparer
-  `Image.format` au content-type.
-- [ ] **7. Rejeu des captures signées** : le nonce est optionnel dans le message signé
-  (`devices/signatures.py:13`), jamais revalidé ni marqué utilisé ; la même preuve signée peut servir
-  à plusieurs œuvres pendant 10 min.
-- [ ] **8. Vote sans email vérifié** : `CurrentUser` ne lit aucun claim `email_verified` (`auth.py:89`) ;
-  avec l'inscription libre côté web, comptes jetables = votes multiples.
-- [ ] **9. Rôle `reviewer` lu depuis le JWT** (`auth.py:69`) alors que le web n'active pas de plugin de
-  rôles Better Auth (non vérifié) : soit le rôle est inatteignable, soit il faut garantir qu'aucun
-  utilisateur ne peut l'écrire lui-même.
-- [ ] **10. CI** (`.github/workflows/ci.yml`) : `push` seulement sur `main` (pas `develop`) ; les jobs
-  `test` et `docker` n'ont pas de bloc `permissions:` ; actions épinglées par tag et non par SHA.
-- [ ] **11. Dockerfile** : tourne en root, image de base non épinglée par digest ; `alembic upgrade head`
-  au démarrage de chaque instance (course si plusieurs instances).
+- [ ] **1. Le badge « human proven » est gratuit** — *partiellement corrigé.*
+  - Fait : une preuve ne compte que si elle diffère de l'œuvre (fichier principal, GLB détaillé, poster)
+    et des autres preuves, par SHA-256 et, pour les images, par pHash (`works/service.py`,
+    `_distinct_evidence`).
+  - Reste : `ALLOW_IMPORTED_PROOFS_FOR_BADGE` vaut toujours `true` par défaut (`config.py`) et
+    `render.yaml` le force à `"true"` en prod. Deux images importées quelconques mais différentes donnent
+    encore le badge, donc le droit de vote (`votes/service.py:23`). Les preuves non-image (vidéo…) ne
+    sont comparées que par SHA-256 : modifier un octet suffit. → Passer à `false` en prod dès que la
+    capture signée de l'app Android est disponible.
+  - Décision du 2026-11-22 : garder `true` en prod pour l'instant. Avec `false`, le web n'envoyant que des
+    preuves importées, plus personne n'obtiendrait le badge ni ne pourrait voter.
+- [ ] **3. Rate limit inefficace derrière Render** — *corrigé, hypothèse à confirmer.*
+  - Fait : `render.yaml` déclare `CLIENT_IP_HEADER=CF-Connecting-IP`, `PROOF_URL_SECRET`, `NONCE_SECRET`,
+    `ATTESTATION_PROVIDER` et `ALLOW_IMPORTED_PROOFS_FOR_BADGE`. Une valeur d'en-tête qui n'est pas une IP
+    retombe sur l'IP du socket (`rate_limit.py`, `client_key`).
+  - Reste : que Render place Cloudflare devant chaque service, et que Cloudflare réécrive toujours
+    `CF-Connecting-IP`, n'est pas documenté par Render (non vérifié, seulement des posts de la communauté).
+    → Confirmer en prod, par exemple en envoyant un `CF-Connecting-IP` forgé et en vérifiant qu'il n'est
+    pas pris comme clé.
+  - Procédure (à faire par l'équipe, pas automatisée) : envoyer ~21 `POST /api/v1/scan/image` en moins
+    d'une minute, chacun avec un `CF-Connecting-IP` forgé différent. Une réponse 429 avant la fin prouve
+    que l'en-tête forgé est ignoré ; aucune 429 prouve qu'il est pris comme clé (à corriger).
+- [ ] **8. Vote sans email vérifié** — *partiellement corrigé (PR #29).*
+  - Fait : `CurrentUser` lit le claim `emailVerified` du jeton (`auth.py`). Avec
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=true`, `POST /votes` répond 403 `email_not_verified` si l'email du
+    votant n'est pas vérifié (`votes/service.py`). Les autres routes ne sont pas concernées.
+  - Décision du 2026-11-22 : d'abord la PR #29 (refus du vote seulement, derrière
+    `REQUIRE_VERIFIED_EMAIL_TO_VOTE=false` par défaut). La vérification d'e-mail à l'inscription existe sur
+    `develop` d'artiko-web (`src/lib/auth.ts`, `requireEmailVerification: true`), pas encore sur son `main`.
+  - Reste : le réglage vaut `false` par défaut, car le web ne vérifie pas encore les emails à
+    l'inscription : l'activer maintenant bloquerait tous les votes. → L'activer en prod (et l'ajouter à
+    `render.yaml`) quand la PR web des comptes vérifiés est fusionnée. Non vérifié sur un vrai jeton
+    Better Auth : le nom du claim vient de la PR #18 (`feat/verified-email-tokens`, passée en brouillon),
+    qui va plus loin en refusant tout jeton non vérifié ; à reprendre après le déploiement du web, en
+    l'adaptant à #29 (les deux touchent `auth.py`).
+- [ ] **9. Rôle `reviewer` lu depuis le JWT** — *corrigé dans la PR #27, en revue.*
+  - Constat : artiko-web (`src/lib/auth.ts`) n'active que les plugins `jwt`, `bearer`,
+    `breachedPasswordCheck` et `nextCookies`, sans champ `role` : le JWT n'a jamais de claim `role`, donc
+    personne n'était reviewer (et personne ne pouvait s'attribuer le rôle).
+  - Correctif : reviewers désignés côté API par `REVIEWER_USER_IDS` (ids Better Auth, vide = personne) ;
+    le claim `role` n'est plus lu. À renseigner à la main dans le tableau de bord Render (`sync: false`).
 
 ## 🟠 Bugs
 
-- [ ] **12. Appels bloquants dans l'event loop** : `storage.save` / `storage.load` (boto3 synchrone) sont
-  appelés depuis des `async def` (`works/service.py:81`, `:101`, `works/router.py:114`), de même que
-  `kind_of` (décodage Pillow) et la recherche numpy de l'index. Un upload S3 lent fige toute l'API.
-  → `run_in_threadpool` ou client S3 asynchrone.
-- [ ] **13. Pas de requêtes `Range` sur `/media`** (`media/router.py:10`) : le fichier entier est chargé
-  en mémoire et renvoyé en 200. Safari iOS exige des réponses 206 pour lire une vidéo MP4 → vidéos
-  probablement illisibles sur iPhone (à confirmer). → Redirection vers une URL S3 présignée, ou réponse
-  streamée avec support des ranges.
-- [ ] **14. Fichiers orphelins** : l'œuvre et ses preuves sont écrites dans le stockage avant le `commit`
-  (`works/service.py:81`, `:101`) ; un `IntegrityError` laisse les fichiers.
-- [ ] **15. Course sur `upsert_artist_of_user`** (`artists/service.py:28`) : deux premiers `PUT` simultanés
-  → `IntegrityError` sur `user_id` unique → 500 au lieu d'un upsert.
 - [ ] **16. Les cas de revue n'ont aucun endpoint** : `ReviewCase` est créé (`review/service.py:9`) mais
   aucun routeur `review` n'est monté (`main.py:23`). Une œuvre signalée « possible copy » reste bloquée,
-  sans recours.
-- [ ] **17. Index de similarité jamais purgé** (`scan/index.py:52`) : il ne fait qu'ajouter, et chaque
-  processus garde sa propre copie (incohérence entre instances).
+  sans recours. → *Corrigé dans la PR #27, en revue.*
+  - `GET /review/cases` (paginé, filtre `status`) et `POST /review/cases/{id}/decision`
+    (`cleared` | `confirmed`), réservés aux reviewers ; un reviewer ne tranche pas son propre cas
+    (403 `own_case`).
+  - `cleared` laisse le même artiste republier le même fichier (même SHA-256). Un cas `confirmed` est
+    définitif : un renvoi le réutilise et il l'emporte sur un `cleared`.
+  - Un seul cas ouvert par artiste et fichier, même en concurrence (index unique partiel + `ON CONFLICT`).
+    Migration `0017` : supprime d'abord les cas ouverts en double déjà présents.
+  - Pagination : `offset` plafonné à 1 000 000 (422 au-delà, au lieu d'un 500).
+  - Relu deux fois par les trois relecteurs ; suite complète : 281 tests réussis, 2 ignorés.
+  - Reste : relier un cas levé à l'œuvre publiée ensuite ; aucune interface web pour ces routes.
 
 ## 🟡 Architecture / dette
 
-- [ ] **18. Détection pHash en scan complet** : chaque publication charge le pHash de toutes les œuvres
-  et compare en Python (`integrity/service.py:49`). → Requête SQL / index dès que le volume grandit,
-  comme prévu pour CLIP (`scan/index.py:3`).
-- [ ] **19. `refresh` de l'index à chaque scan** (`scan/service.py:27`) : 2 requêtes DB par scan sous
-  verrou global ; un TTL suffirait.
-- [ ] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` renvoient tout, avec
-  les preuves.
-- [ ] **21. CORS `allow_credentials=True`** (`main.py:32`) alors que l'API n'utilise que des bearer
-  tokens : inutile, à retirer.
-- [ ] **22. Détail de l'erreur JWT renvoyé au client** (`auth.py:88`, `f"Invalid token: {e}"`) : à garder
-  dans les logs.
-- [ ] **23. Rate limit en mémoire par processus** (`rate_limit.py:3`, assumé) : partager les compteurs
-  (Redis) si plusieurs instances.
-- [ ] **24. Dépendances déclarées mais non importées** : `celery`, `redis`, `sse-starlette`, `pyacoustid`
-  et `pgvector` n'apparaissent dans aucun import de `app/` ni `scripts/` (`grep`). Les retirer allège
-  l'image et la surface d'attaque.
+- [x] **18. Détection pHash en scan complet** : PostgreSQL calcule la distance exacte et renvoie
+  les meilleures correspondances par groupe. Quatre index filtrent les candidats pour les seuils
+  jusqu'à 11 bits, dont le seuil par défaut de 8. Les seuils supérieurs gardent le calcul SQL exact.
+  `bit_count` exige PostgreSQL 14 ou plus (version Neon non vérifiée).
+- [x] **19. `refresh` de l'index à chaque scan** : délai par processus configurable via
+  `SCAN_INDEX_REFRESH_SECONDS` (15 s par défaut). Une publication invalide l'index local après validation
+  de la transaction. Le contrôle des doublons continue d'actualiser l'index avant la comparaison.
+  L'invalidation reste locale : les autres instances voient une nouvelle œuvre au plus 15 s plus tard.
+- [x] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` utilisent
+  `limit` et `offset`. Le musée charge les preuves et calcule la salle pour les œuvres de la page.
+- [x] **21. CORS `allow_credentials=True`** : option retirée. Les origines configurées peuvent
+  toujours envoyer l'en-tête `Authorization` pour l'authentification bearer.
+- [x] **22. Détail de l'erreur JWT renvoyé au client** : réponse 401 générique. Le type d'erreur est
+  journalisé au niveau debug sans le jeton, les claims ou le détail fourni par le client.
+- [x] **23. Rate limit en mémoire par processus** : les instances partagent les compteurs lorsque
+  `RATE_LIMIT_REDIS_URL` est configurée. Sans cette variable, les compteurs restent locaux au processus.
+  Redis configuré mais injoignable : les endpoints limités répondent 503 (choix fail-closed).
+  `RATE_LIMIT_REDIS_URL` n'est pas dans `render.yaml` : compteurs locaux en prod (une seule instance).
+- [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `sse-starlette`, `pyacoustid`
+  et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`. `redis` est conservé : le point 23
+  l'utilise pour les compteurs partagés.
+
+## 🔵 Relecture de `1942d23` (après le MVP)
+
+Relecture du 2026-11-22 de `1942d23` (poussé sur `develop` sans PR) par trois relecteurs : bugs, cas limites
+(exécutés sur Postgres local) et sécurité (gitleaks : aucune fuite). Les points 2, 4 à 7, 10, 11, 13 à 15 et 17
+tiennent. À traiter après la démo.
+
+- [ ] **25. Révocations Google en décimal ignorées** (`devices/attestation.py:121`, `revocation.py:26`) :
+  993 entrées sur 2211 de la liste réelle sont des nombres décimaux, or seule la forme hexadécimale est
+  comparée. Que ce soient des numéros de série décimaux n'est pas documenté par Google (non vérifié).
+  → Ajouter `format(int(key), "x")` pour les clés uniquement numériques, et normaliser les zéros de tête.
+- [ ] **26. Chaîne d'attestation malformée → 500** (`devices/attestation.py:69`, `:112`) : `InvalidVersion`
+  et une `ValueError` levée par `verifier.verify` ne sont pas attrapées (2 sur 250 mutations aléatoires).
+  Le détail de `cryptography` part aussi dans le message d'erreur 400.
+- [ ] **27. Point 12 inachevé** : `storage.is_image` (`scan/router.py:31`), `index.search` et `index.top`
+  (produit numpy) tournent encore dans l'event loop. → `run_in_threadpool`.
+- [ ] **28. Limites globales exploitables en déni de service** (`rate_limit.py:186`) : 6 comptes jetables à
+  10 publications par minute épuisent le plafond global de 60, et tout le monde reçoit 429 (même logique pour
+  votes, artistes, expositions). Le corps multipart est en plus reçu avant le rate limit. Lié au point 8.
+- [ ] **29. Plafonds d'image stricts** (`storage.py:55`) : WebP refusé au-delà d'environ 6 Mpx, PNG au-delà
+  de 17 Mpx, JPEG progressif au-delà de 14 Mpx. Décision produit : relever ou rendre configurable par format.
+- [ ] **30. L'attestation ne prouve ni un téléphone sain ni notre application** (antérieur au commit) :
+  `RootOfTrust` et `attestationApplicationId` ne sont pas lus, et `INTEGRITY_PROVIDER=none`. Préalable au
+  passage de `ALLOW_IMPORTED_PROOFS_FOR_BADGE` à `false` (point 1).
+- [ ] **31. Mineurs** :
+  - au premier chargement de la liste de révocation, les enregistrements concurrents reçoivent 503 ;
+  - une limite à 0 laisse passer une requête en mémoire, aucune avec Redis ;
+  - `display_name` contenant un caractère NUL → 500 ;
+  - tout `IntegrityError` est traduit en `duplicate_work` (`works/service.py:143`) ;
+  - transaction ouverte pendant les envois S3, et fichiers orphelins si un envoi ou le `commit` échoue ;
+  - la révocation n'est vérifiée qu'à l'enregistrement de l'appareil, jamais à la capture.
 
 ## Ordre suggéré
 
-1, 3, 5, 12 et 13 d'abord (intégrité du concours, disponibilité en prod), puis 2, 4 et 16.
+Merger #27 (9 et 16) puis #29 (8). Ensuite : la confirmation du 3 en prod, l'activation du vote réservé aux
+e-mails vérifiés dès que le web vérifie les e-mails en prod, et la fin du 1 quand l'app Android capture des
+preuves signées.

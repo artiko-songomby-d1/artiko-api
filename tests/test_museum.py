@@ -43,3 +43,23 @@ def test_museum_lists_the_artists_works(client):
     assert museum["artist"]["id"] == artist_id
     assert [s["kind"] for s in museum["slots"]] == ["wall"]
     assert client.get(f"/api/v1/artists/{uuid.uuid4()}/museum").status_code == 404
+
+
+def test_museum_paginates_and_lays_out_each_room(client):
+    artist_id = become_artist(client, "alice")
+    private_work = publish(client, "alice", 1).json()
+    public_work = publish(client, "alice", 2, proof_visibility="public").json()
+    url = f"/api/v1/artists/{artist_id}/museum"
+
+    first = client.get(url, params={"limit": 1}).json()
+    second = client.get(url, params={"limit": 1, "offset": 1}).json()
+    assert [slot["work"]["id"] for slot in first["slots"]] == [private_work["id"]]
+    assert [slot["work"]["id"] for slot in second["slots"]] == [public_work["id"]]
+    assert first["slots"][0]["work"]["proof_urls"] == []
+    assert set(second["slots"][0]["work"]["proof_urls"]) == set(public_work["proof_urls"])
+    assert len(second["slots"][0]["work"]["proof_urls"]) == 2
+    assert first["slots"][0]["position"] == second["slots"][0]["position"]
+
+    empty = client.get(url, params={"limit": 1, "offset": 2}).json()
+    assert empty["artist"]["id"] == artist_id
+    assert empty["slots"] == []

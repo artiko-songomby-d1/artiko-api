@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, text
 from app.features.works import service as works_service
 from app.main import app
 from app.platform import storage
-from app.platform.ai_detection import AI_REFUSAL, MAX_IMAGE_BYTES, AiDetector, get_ai_detector, spend_check_budget
+from app.platform.ai_detection import AI_REFUSAL, MAX_IMAGE_BYTES, AiDetector, get_ai_detector
 from app.platform.config import get_settings
 from app.platform.sightengine import CHECK_URL
 from app.platform.video_frames import VideoFrames
@@ -30,7 +30,7 @@ GLB = "model/gltf-binary"
 def sightengine():
     fake = FakeSightengine(0.1)
     app.dependency_overrides[get_ai_detector] = lambda: AiDetector(
-        fake.client(), VideoFrames(ffmpeg_runner()), threshold=0.8, budget=spend_check_budget
+        fake.client(), VideoFrames(ffmpeg_runner()), threshold=0.8
     )
     yield fake
     app.dependency_overrides.pop(get_ai_detector, None)

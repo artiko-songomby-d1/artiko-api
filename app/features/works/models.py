@@ -6,15 +6,22 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
     func,
+    literal_column,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql.functions import Function
 
 from app.platform.db import Base
+
+PHASH_HEX_DIGITS = 16
+PHASH_SEGMENT_WIDTH = 4
+PHASH_SEGMENT_OFFSETS = tuple(range(0, PHASH_HEX_DIGITS, PHASH_SEGMENT_WIDTH))
 
 
 class Exposition(Base):
@@ -50,7 +57,7 @@ class Work(Base):
         ForeignKey("exposition.id", ondelete="SET NULL"), index=True, nullable=True
     )
     # 64-bit perceptual hash as 16 hex digits; null for audio, video and 3D.
-    phash: Mapped[str | None] = mapped_column(String(16), index=True, nullable=True)
+    phash: Mapped[str | None] = mapped_column(String(PHASH_HEX_DIGITS), index=True, nullable=True)
     # Works of one artist that are near-copies of each other (a series) share this id.
     series_id: Mapped[uuid.UUID | None] = mapped_column(index=True, nullable=True)
     # CLIP image embedding (512 floats, normalized); null for audio and video.
@@ -60,6 +67,21 @@ class Work(Base):
     proofs: Mapped[list["WorkProof"]] = relationship(
         lazy="raise", order_by="WorkProof.created_at", cascade="all, delete-orphan", passive_deletes=True
     )
+
+
+def work_phash_hex() -> Function[str]:
+    return func.lpad(func.lower(Work.phash), literal_column(str(PHASH_HEX_DIGITS)), literal_column("'0'"), type_=Text())
+
+
+def work_phash_segment(offset: int) -> Function[str]:
+    # Keep the positions literal so PostgreSQL can match this expression to its index.
+    return func.substr(
+        work_phash_hex(), literal_column(str(offset + 1)), literal_column(str(PHASH_SEGMENT_WIDTH)), type_=Text()
+    )
+
+
+for number, offset in enumerate(PHASH_SEGMENT_OFFSETS, start=1):
+    Work.__table__.append_constraint(Index(f"ix_work_phash_segment_{number}", work_phash_segment(offset)))
 
 
 class WorkProof(Base):

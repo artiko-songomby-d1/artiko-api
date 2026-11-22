@@ -15,6 +15,7 @@ from tests.conftest import (
     publish,
     register_device,
     signed_claim,
+    sketch,
 )
 
 
@@ -110,7 +111,7 @@ def test_signed_captures_earn_the_badge_and_imported_ones_do_not(client):
 def test_one_signed_capture_is_not_enough(client):
     become_artist(client, "alice")
     device_id, key = register_device(client, "alice")
-    proofs = [png(500), png(501)]
+    proofs = [sketch(500), sketch(501)]  # two different drawings: only the missing signature can refuse the badge
     claims = [signed_claim(device_id, key, proofs[0]), {"source": "imported"}]
     r = post_claims(client, "alice", claims, proofs)
     assert r.status_code == 201 and r.json()["human_proven"] is False

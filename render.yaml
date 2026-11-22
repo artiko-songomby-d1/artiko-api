@@ -40,4 +40,24 @@ services:
       - key: SIGHTENGINE_USER
         sync: false
       - key: SIGHTENGINE_SECRET
+      # Added after the service was created. Render ignores a new `sync: false` entry on an existing
+      # Blueprint, so these use `value` (applied at the next sync, and wins over a dashboard edit) or
+      # `generateValue` (created once if the variable does not exist yet, then kept).
+      # The rate limits key each visitor on this header. Render puts Cloudflare in front of every web
+      # service: it writes CF-Connecting-IP with one address and refuses a request that already has it.
+      - key: CLIENT_IP_HEADER
+        value: CF-Connecting-IP
+      # Signs the short-lived links to private proof files, and the nonces phones attest.
+      - key: PROOF_URL_SECRET
+        generateValue: true
+      - key: NONCE_SECRET
+        generateValue: true
+      - key: ATTESTATION_PROVIDER
+        value: chain
+      # Transition switch (see the README): set to "false" once the Android app captures signed proof.
+      - key: ALLOW_IMPORTED_PROOFS_FOR_BADGE
+        value: "true"
+      # Better Auth user ids of the reviewers, comma-separated (empty = nobody). Not a `value`, so a sync
+      # never wipes the list: on the existing service Render skips this entry, so add it in the dashboard.
+      - key: REVIEWER_USER_IDS
         sync: false

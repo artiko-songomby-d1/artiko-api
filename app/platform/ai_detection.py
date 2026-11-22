@@ -8,17 +8,17 @@ unreadable, refuses it.
 import asyncio
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import Annotated, Generic, TypeVar
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from PIL import Image
 
 from app.platform import storage
 from app.platform.config import get_settings
 from app.platform.errors import BadRequest
-from app.platform.rate_limit import SlidingWindowLimiter, enforce_limits
+from app.platform.rate_limit import RedisSlidingWindowLimiter, SlidingWindowLimiter, admit
 from app.platform.sightengine import REQUEST_SPACING_SECONDS, Credentials, RequestSpacer, Sightengine
 from app.platform.video_frames import (
     FRAME_SHARES,
@@ -49,23 +49,34 @@ AI_REFUSAL = (
 
 
 T = TypeVar("T")
-CheckBudget = Callable[[str], None]
+CheckBudget = Callable[[str], Awaitable[None]]
 check_limiter = SlidingWindowLimiter()
 
 
-def spend_check_budget(requester: str) -> None:
+def make_check_budget(shared: RedisSlidingWindowLimiter | None) -> CheckBudget:
     """Each check spends Sightengine operations from a small free quota: cap the checks per user and overall.
 
-    Raises TooManyRequests past either cap. Runs in the event loop with no await, so two threads never touch the
-    limiter.
+    The counters are shared through Redis, like the other write limits, when RATE_LIMIT_REDIS_URL is set.
+    Raises TooManyRequests past either cap.
     """
-    settings = get_settings()
-    per_user, overall = settings.works_rate_limit_per_minute, settings.works_global_rate_limit_per_minute
-    # The prefix keeps a user id from ever matching the limiter's global key.
-    enforce_limits(check_limiter, f"user:{requester}", per_user, overall)
+
+    async def spend(requester: str) -> None:
+        settings = get_settings()
+        per_user, overall = settings.works_rate_limit_per_minute, settings.works_global_rate_limit_per_minute
+        # The prefix keeps a user id from ever matching the limiter's global key.
+        await admit(check_limiter, shared, "works-ai-check", f"user:{requester}", per_user, overall)
+
+    return spend
 
 
-def unlimited(requester: str) -> None:
+def get_check_budget(request: Request) -> CheckBudget:
+    return make_check_budget(getattr(request.app.state, "rate_limiter", None))
+
+
+AiBudget = Annotated[CheckBudget, Depends(get_check_budget)]
+
+
+async def unlimited(requester: str) -> None:
     """A budget that never refuses."""
 
 
@@ -92,13 +103,14 @@ class AiDetector:
         frames: VideoFrames,
         threshold: float,
         max_video_checks: int = 1,
-        budget: CheckBudget = unlimited,
     ):
-        self._sightengine, self._frames, self._threshold, self._budget = sightengine, frames, threshold, budget
+        self._sightengine, self._frames, self._threshold = sightengine, frames, threshold
         self._video_slots = PerLoop(lambda: asyncio.Semaphore(max_video_checks))
         self._shrink_slot = PerLoop(asyncio.Lock)
 
-    async def check_main_file(self, data: bytes, kind: str, ext: str, ai_declared: bool, requester: str) -> None:
+    async def check_main_file(
+        self, data: bytes, kind: str, ext: str, ai_declared: bool, requester: str, budget: CheckBudget = unlimited
+    ) -> None:
         """Raises BadRequest when the main file must be refused, TooManyRequests when `requester` or everyone used up
         the check budget; returns in every other case, checked or not.
 
@@ -107,18 +119,20 @@ class AiDetector:
         if self._sightengine is None or ai_declared:
             return
         if kind == "image":
-            score = await self._image_score(self._sightengine, data, ext, requester)
+            score = await self._image_score(self._sightengine, data, ext, budget, requester)
         elif kind == "video":
-            score = await self._video_score(self._sightengine, data, ext, requester)
+            score = await self._video_score(self._sightengine, data, ext, budget, requester)
         else:
             return
         if score is not None and score >= self._threshold:
             log.info("main file refused as AI-generated (field=file)")
             raise BadRequest("ai_generated_content", AI_REFUSAL, details=FILE_FIELD)
 
-    async def _image_score(self, sightengine: Sightengine, data: bytes, ext: str, requester: str) -> float | None:
+    async def _image_score(
+        self, sightengine: Sightengine, data: bytes, ext: str, budget: CheckBudget, requester: str
+    ) -> float | None:
         if len(data) <= MAX_IMAGE_BYTES:
-            self._budget(requester)
+            await budget(requester)
             return await sightengine.ai_generated_score(data, IMAGE_CONTENT_TYPES[ext], "image")
         try:
             async with self._shrink_slot.get():
@@ -129,17 +143,19 @@ class AiDetector:
         if copy is None:
             log.warning("AI detection skipped (image file): over %d bytes after shrinking", MAX_IMAGE_BYTES)
             return None
-        self._budget(requester)
+        await budget(requester)
         return await sightengine.ai_generated_score(copy, "image/jpeg", "image")
 
-    async def _video_score(self, sightengine: Sightengine, data: bytes, ext: str, requester: str) -> float | None:
+    async def _video_score(
+        self, sightengine: Sightengine, data: bytes, ext: str, budget: CheckBudget, requester: str
+    ) -> float | None:
         """The highest score of the frames checked before the deadline, which includes the wait for a video slot."""
         if ext != ".mp4":
             raise BadRequest("unsupported_video_format", "Only MP4 videos are accepted", details=FILE_FIELD)
         scores: list[float] = []
         try:
             async with asyncio.timeout(VIDEO_CHECK_SECONDS), self._video_slots.get():
-                await self._score_frames(sightengine, data, requester, scores)
+                await self._score_frames(sightengine, data, budget, requester, scores)
         except UnreadableVideo as e:
             message = "This video cannot be read: send a valid MP4"
             raise BadRequest("unreadable_video", message, details=FILE_FIELD) from e
@@ -151,13 +167,15 @@ class AiDetector:
             log.warning("AI detection stopped (video file): over %d s", VIDEO_CHECK_SECONDS)
         return max(scores, default=None)
 
-    async def _score_frames(self, sightengine: Sightengine, data: bytes, requester: str, scores: list[float]) -> None:
+    async def _score_frames(
+        self, sightengine: Sightengine, data: bytes, budget: CheckBudget, requester: str, scores: list[float]
+    ) -> None:
         """Appends each score as it comes, so the frames checked before a timeout still count."""
         frames = await self._frames.extract(data)
         if not frames:
             log.warning("AI detection skipped (video file): ffmpeg extracted no frame")
             return
-        self._budget(requester)
+        await budget(requester)
         for frame in frames:
             score = await sightengine.ai_generated_score(frame, "image/jpeg", "video")
             if score is not None:
@@ -210,7 +228,6 @@ def get_ai_detector() -> AiDetector:
         frames,
         settings.ai_detection_threshold,
         settings.ai_detection_max_video_checks,
-        spend_check_budget,
     )
 
 

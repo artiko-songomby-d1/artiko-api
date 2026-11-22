@@ -10,6 +10,7 @@ from app.features.works.models import Exposition, Work
 from app.platform import storage
 from app.platform.db import Db
 from app.platform.errors import NotFound
+from app.platform.pagination import Page
 
 
 def expositions_query():
@@ -50,8 +51,9 @@ async def load_exposition(db: Db, exposition_id: uuid.UUID) -> ExpositionOut:
     return to_out(*row)
 
 
-async def search_expositions(db: Db, artist_id: uuid.UUID | None) -> list[ExpositionOut]:
-    q = expositions_query().order_by(Exposition.created_at.desc())
+async def search_expositions(db: Db, artist_id: uuid.UUID | None, page: Page) -> list[ExpositionOut]:
+    q = expositions_query().order_by(Exposition.created_at.desc(), Exposition.id)
     if artist_id:
         q = q.where(Exposition.artist_id == artist_id)
+    q = q.limit(page.limit).offset(page.offset)
     return [to_out(*row) for row in await db.execute(q)]
