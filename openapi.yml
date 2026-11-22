@@ -35,6 +35,28 @@ paths:
                 properties:
                   status: { type: string, const: ok }
 
+  /api/v1/ready:
+    get:
+      operationId: ready
+      tags: [health]
+      summary: Readiness probe
+      description: |
+        `/health` only says the process is alive and never touches the database.
+        This one also checks that the database answers.
+      responses:
+        "200":
+          description: The API can serve requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+        "503":
+          description: The database is not reachable (`not_ready`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
   /api/v1/me:
     get:
       operationId: getMe
@@ -53,6 +75,8 @@ paths:
       operationId: upsertMyArtist
       tags: [me]
       summary: Become an artist, or update one's artist profile
+      description: |
+        Each user may send 10 updates a minute; past that the API answers 429 with a `Retry-After` header.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -67,14 +91,19 @@ paths:
               schema: { $ref: "#/components/schemas/Artist" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/artists:
     get:
       operationId: listArtists
       tags: [artists]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Every artist, by name
+          description: Artists by name, one page
           content:
             application/json:
               schema:
@@ -102,13 +131,20 @@ paths:
       operationId: getMuseum
       tags: [artists]
       summary: The artist's 3D museum, laid out by the API so web and Android render the same room
+      description: |
+        Selects works oldest first, with their IDs breaking timestamp ties.
+        Each page has a separate room layout. An offset past the end returns an empty room.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: The room
+          description: The room for this page of works
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Museum" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
 
   /api/v1/works:
     get:
@@ -123,9 +159,11 @@ paths:
           in: query
           description: Words to find in the title, the story or the artist's name, ignoring case
           schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Works, newest first
+          description: Works, newest first, one page
           content:
             application/json:
               schema:
@@ -136,10 +174,22 @@ paths:
       tags: [works]
       summary: Publish a work with its proof of process (artists only)
       description: |
-        The work is `human_proven` when it has at least 2 proof files and is not declared
-        AI-assisted. The same file (SHA-256) cannot be published twice.
+        The work is `human_proven` when it has at least 2 proof files that count and is not declared
+        AI-assisted. A proof counts only when it differs from every file of the work and from the other
+        proofs counted (same SHA-256, or for images the same picture resized or recompressed, do not count
+        twice); such a file is still stored. The same file (SHA-256) cannot be published twice. An image that looks like another
+        artist's work or a known work (CLIP similarity or perceptual hash) is refused with 409 `possible_copy`
+        and the id of the review case (retrying the same file returns the same open case, or the confirmed one once a reviewer confirmed
+        it as a copy, and an artist with 20 open cases gets the latest one instead of a new one); once a reviewer clears
+        the case, the artist may publish that exact file, unless a case for it was confirmed. One that looks like the
+        artist's own earlier work is accepted and the two works share a `series_id`.
         Files: up to 20 MB each; images (jpeg, png, webp), audio (mpeg, wav, ogg),
-        video (mp4, webm), 3D (glb).
+        video (mp4, webm), 3D (glb). Each part must be sent with the content type its bytes really are
+        (`unsupported_file`, 400, otherwise: a PNG sent as `image/jpeg` is refused). A picture with too many
+        pixels is refused with 413 `image_too_large`: over 89 megapixels for a JPEG (14.4 when progressive),
+        17 for a PNG (12.7 when transparent), 6 for a WebP (5.1 when transparent).
+        Each user may publish 10 times a minute, refused attempts included; past that the API answers 429 with
+        a `Retry-After` header.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -153,6 +203,26 @@ paths:
                 story: { type: string, maxLength: 5000, default: "" }
                 category: { $ref: "#/components/schemas/CategoryId" }
                 ai_declared: { type: boolean, default: false }
+                proof_claims:
+                  type: string
+                  description: |
+                    JSON list with one claim per proof file, in the same order. A claim is
+                    `{source: "in_app" | "imported"}`; an in-app capture adds `device_id`, `signature`
+                    (base64 DER ECDSA P-256 over `<sha256>|<captured_at_ms>|<draft_id>|<nonce>`),
+                    `captured_at_ms`, `draft_id`, `nonce` (required: a nonce of `GET /devices/challenge`
+                    issued to this user and not expired; one nonce may sign all the captures of a draft),
+                    and the optional `integrity_token` and `camera`.
+                    Only verified in-app captures count for the human-made badge, and a signed capture
+                    proves one work only: its file (SHA-256) is refused once it is attached to a published
+                    work, whoever signs it again. A publication that fails uses up none of its captures.
+                    Errors (400): `bad_signature`, `unknown_device`, `capture_too_old` (older than 10 minutes),
+                    `capture_in_future`, `invalid_nonce`, `integrity_failed`, `incomplete_capture`,
+                    `invalid_proof_claims`. Error (409): `capture_already_used`.
+                proof_visibility:
+                  type: string
+                  enum: [public, reviewers]
+                  default: reviewers
+                  description: Who may open the proof files; `reviewers` keeps them private to the artist and the reviewers
                 exposition_id:
                   type: string
                   format: uuid
@@ -162,6 +232,18 @@ paths:
                   type: array
                   maxItems: 5
                   items: { type: string, format: binary }
+                model_hd:
+                  type: string
+                  format: binary
+                  description: |
+                    Detailed GLB of a 3D work, loaded on demand; only with a GLB `file`.
+                    Errors (400): `extras_need_model` when `file` is not a GLB, `invalid_model_hd`.
+                poster:
+                  type: string
+                  format: binary
+                  description: |
+                    Still image (jpeg, png, webp) shown while a 3D work loads; only with a GLB `file`.
+                    Errors (400): `extras_need_model` when `file` is not a GLB, `invalid_poster`.
       responses:
         "201":
           description: The published work
@@ -173,6 +255,8 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/works/{work_id}:
     parameters:
@@ -188,24 +272,115 @@ paths:
               schema: { $ref: "#/components/schemas/Work" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/devices/challenge:
+    get:
+      operationId: getDeviceChallenge
+      tags: [devices]
+      summary: The nonce a phone puts into its key attestation, then into each capture it signs
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: A nonce signed for this user, valid for ten minutes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Challenge" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
+
+  /api/v1/devices:
+    post:
+      operationId: registerDevice
+      tags: [devices]
+      summary: Register the attested hardware key of a phone
+      description: |
+        The key is generated in the Android Keystore with the nonce as attestation challenge. The server
+        checks the certificate chain up to Google's attestation roots, that the attested key is the
+        registered key, that the challenge is the nonce, and that the key is hardware-backed.
+        In the chain, every certificate that signs another must be a CA, only the key's own certificate
+        may carry the attestation, and none may be on Google's list of revoked attestation keys.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceIn" }
+      responses:
+        "201":
+          description: The device (registering the same key again returns it)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503":
+          description: |
+            The configured shared rate limiter is unreachable (`rate_limit_unavailable`), or Google's list of
+            revoked attestation keys could not be fetched yet (`attestation_unavailable`): try again later
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/v1/works/{work_id}/proofs:
+    parameters:
+      - { name: work_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listWorkProofs
+      tags: [works]
+      summary: The proofs the caller may open, with fresh links
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Public proofs for everyone, private ones for the owner and the reviewers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Proof" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/proofs/{proof_id}/file:
+    parameters:
+      - { name: proof_id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: exp, in: query, required: true, schema: { type: integer }, description: Unix time when the link expires }
+      - { name: sig, in: query, required: true, schema: { type: string }, description: Signature issued with the link }
+    get:
+      operationId: getProofFile
+      tags: [works]
+      summary: A proof file, for the holder of a valid signed link
+      responses:
+        "200":
+          description: The file
+          content:
+            "*/*": { schema: { type: string, format: binary } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
+
   /api/v1/expositions:
     get:
       operationId: listExpositions
       tags: [expositions]
       parameters:
         - { name: artist_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: Expositions, newest first
+          description: Expositions, newest first, one page with IDs breaking timestamp ties
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Exposition" }
+        "422": { $ref: "#/components/responses/Invalid" }
     post:
       operationId: createExposition
       tags: [expositions]
       summary: Create an exposition to group one's works (artists only)
+      description: |
+        Each user may create 10 expositions a minute; past that the API answers 429 with a `Retry-After` header.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -221,6 +396,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/expositions/{exposition_id}:
     parameters:
@@ -245,6 +422,9 @@ paths:
         Refused when the work is not human-proven (`not_eligible`), was not published this
         month (`not_in_contest`) or belongs to the voter (`own_work`), all 400; and when the
         voter already voted in this category this month (`already_voted`, 409).
+        When the server sets `REQUIRE_VERIFIED_EMAIL_TO_VOTE`, a voter whose email is not verified is
+        refused with 403 `email_not_verified`.
+        Each user may try 30 votes a minute; past that the API answers 429 with a `Retry-After` header.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -263,8 +443,11 @@ paths:
               schema: { $ref: "#/components/schemas/Vote" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/votes/mine:
     get:
@@ -347,7 +530,11 @@ paths:
       operationId: scanImage
       tags: [scan]
       summary: Identify a photo of an artwork (camera on Android, upload on the web)
-      description: The photo is not stored. Images only, up to 20 MB.
+      description: |
+        The photo is not stored. Images only (jpeg, png, webp; `not_an_image`, 400, otherwise), up to 5 MB.
+        A picture with too many pixels is refused with 413 `image_too_large`: over 89 megapixels for a JPEG
+        (14.4 when progressive), 17 for a PNG (12.7 when transparent), 6 for a WebP (5.1 when transparent).
+        Each client may scan 20 times a minute; past that the API answers 429 with a `Retry-After` header.
       requestBody:
         required: true
         content:
@@ -365,6 +552,66 @@ paths:
               schema: { $ref: "#/components/schemas/ScanResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
+
+  /api/v1/review/cases:
+    get:
+      operationId: listReviewCases
+      tags: [review]
+      summary: The review queue (reviewers only)
+      description: |
+        Reviewers are the users listed in the API's `REVIEWER_USER_IDS`; a role claim in the token is ignored.
+        Cases are listed oldest first, with IDs breaking timestamp ties.
+      security: [{ bearer: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, cleared, confirmed], default: open }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Cases with this status, one page
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ReviewCase" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /api/v1/review/cases/{case_id}/decision:
+    parameters:
+      - { name: case_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: decideReviewCase
+      tags: [review]
+      summary: Decide an open case (reviewers only)
+      description: |
+        `cleared`: not a copy. The artist may publish this exact file (same SHA-256) again and the copy check
+        lets it through. `confirmed`: a copy, the file stays refused. Only an open case can be decided
+        (`case_already_decided`, 409), and never by the reviewer whose own publication it is about (`own_case`, 403).
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewDecisionIn" }
+      responses:
+        "200":
+          description: The decided case
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewCase" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Not a reviewer (`not_a_reviewer`), or the case is about the reviewer's own publication (`own_case`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
 
 components:
   securitySchemes:
@@ -374,6 +621,16 @@ components:
       bearerFormat: JWT
 
   parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Page size
+      schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    Offset:
+      name: offset
+      in: query
+      description: Items to skip; request the next page with `offset += limit`
+      schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
     ArtistId:
       name: artist_id
       in: path
@@ -388,16 +645,26 @@ components:
       description: Missing or invalid token (`unauthorized`, `invalid_token`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Forbidden:
-      description: Signed in, but not allowed (`not_an_artist`)
+      description: Signed in, but not allowed (`not_an_artist`, `not_a_reviewer`, `email_not_verified`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: No such resource
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Conflict:
-      description: Already exists (`already_voted`, `duplicate_work`)
+      description: Conflicts with the current state (`already_voted`, `duplicate_work`, `possible_copy`, `case_already_decided`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     TooLarge:
-      description: File over the size limit (`file_too_large`)
+      description: File over the size limit (`file_too_large`), or picture with too many pixels (`image_too_large`)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    TooManyRequests:
+      description: Rate limit hit (`rate_limited`); wait `Retry-After` seconds
+      headers:
+        Retry-After:
+          description: Seconds to wait before the next request
+          schema: { type: integer }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    RateLimitUnavailable:
+      description: The configured shared rate limiter is unreachable (`rate_limit_unavailable`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Invalid:
       description: Body or parameters fail validation (`invalid_request`)
@@ -414,6 +681,7 @@ components:
           properties:
             code: { type: string, examples: [already_voted] }
             message: { type: string }
+            case_id: { type: string, format: uuid, description: "Review case of a refused publication (`possible_copy`)" }
 
     Month:
       type: string
@@ -464,6 +732,42 @@ components:
       type: string
       enum: [image, audio, video, model]
 
+    Challenge:
+      type: object
+      required: [nonce, expires_at]
+      properties:
+        nonce: { type: string }
+        expires_at: { type: string, format: date-time }
+
+    DeviceIn:
+      type: object
+      required: [nonce, public_key, attestation_chain]
+      properties:
+        nonce: { type: string, maxLength: 200 }
+        public_key: { type: string, description: Base64 DER SubjectPublicKeyInfo of the P-256 key }
+        attestation_chain:
+          type: array
+          maxItems: 10
+          description: Base64 DER certificates, leaf first
+          items: { type: string }
+
+    Device:
+      type: object
+      required: [id, attestation_level]
+      properties:
+        id: { type: string, format: uuid }
+        attestation_level: { type: string, enum: [strongbox, tee, software, unverified] }
+
+    Proof:
+      type: object
+      required: [id, visibility, source, signed, url]
+      properties:
+        id: { type: string, format: uuid }
+        visibility: { type: string, enum: [public, reviewers] }
+        source: { type: string, enum: [in_app, imported], description: Imported files never count for the badge }
+        signed: { type: boolean, description: The capture's signature, device and integrity verdict were verified }
+        url: { type: string, format: uri }
+
     Work:
       type: object
       required:
@@ -490,10 +794,14 @@ components:
         story: { type: string }
         category: { $ref: "#/components/schemas/CategoryId" }
         exposition_id: { type: [string, "null"], format: uuid, description: Always present; null when the work is in no exposition }
+        series_id: { type: [string, "null"], format: uuid, description: Shared by an artist's works that are near-copies of each other }
         media_url: { type: string, format: uri }
+        media_hd_url: { type: [string, "null"], format: uri, description: Detailed GLB of a 3D work, null when it has none }
+        poster_url: { type: [string, "null"], format: uri, description: Still image shown while a 3D work loads, null when it has none }
         media_kind: { $ref: "#/components/schemas/MediaKind" }
         proof_urls:
           type: array
+          description: The proofs the caller may open; private ones are short-lived signed links, for the owner and reviewers only
           items: { type: string, format: uri }
         sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         human_proven: { type: boolean, description: "Human-made badge: proof of process, not AI-declared" }
@@ -644,3 +952,31 @@ components:
             properties:
               label: { type: string }
               url: { type: string, format: uri }
+
+    ReviewCase:
+      type: object
+      required: [id, reason, status, work_id, other_work_id, known_work_id, artist_id, candidate_sha256, score, signal,
+        created_at, decided_by, decided_at]
+      properties:
+        id: { type: string, format: uuid }
+        reason: { type: string, examples: [possible_copy] }
+        status: { type: string, enum: [open, cleared, confirmed] }
+        work_id:
+          type: [string, "null"]
+          format: uuid
+          description: The work under review; null when the publication was refused
+        other_work_id: { type: [string, "null"], format: uuid, description: The Artiko work it looks like }
+        known_work_id: { type: [string, "null"], format: uuid, description: The known work it looks like }
+        artist_id: { type: [string, "null"], format: uuid, description: Who tried to publish it }
+        candidate_sha256: { type: [string, "null"], description: SHA-256 of the refused file }
+        score: { type: [number, "null"] }
+        signal: { type: [string, "null"], enum: [clip, phash, null] }
+        created_at: { type: string, format: date-time }
+        decided_by: { type: [string, "null"], description: User id of the reviewer who decided it }
+        decided_at: { type: [string, "null"], format: date-time }
+
+    ReviewDecisionIn:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [cleared, confirmed] }

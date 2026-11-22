@@ -1,7 +1,7 @@
 """Errors raised by services and mapped to HTTP in one place.
 
 Callers name what went wrong (`NotFound`, `Conflict`...) and never pass status numbers around.
-Every error leaves the API as {"error": {"code", "message"}}.
+Every error leaves the API as {"error": {"code", "message"}}, plus a few named fields for some (a review case id).
 """
 
 import logging
@@ -16,8 +16,14 @@ log = logging.getLogger("artiko.errors")
 class ApiError(Exception):
     status = 500
 
-    def __init__(self, code: str, message: str):
-        self.code, self.message = code, message
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+        details: dict[str, str] | None = None,
+    ):
+        self.code, self.message, self.headers, self.details = code, message, headers or {}, details or {}
 
 
 class BadRequest(ApiError):
@@ -44,14 +50,33 @@ class PayloadTooLarge(ApiError):
     status = 413
 
 
-def _body(code: str, message: str) -> dict:
-    return {"error": {"code": code, "message": message}}
+class RangeNotSatisfiable(ApiError):
+    status = 416
+
+    def __init__(self, code: str, message: str, size: int):
+        # RFC 9110: a 416 tells the real length, so the client can ask again inside the file.
+        super().__init__(code, message, {"Content-Range": f"bytes */{size}"})
+
+
+class TooManyRequests(ApiError):
+    status = 429
+
+    def __init__(self, code: str, message: str, retry_after: int):
+        super().__init__(code, message, {"Retry-After": str(retry_after)})
+
+
+class ServiceUnavailable(ApiError):
+    status = 503
+
+
+def _body(code: str, message: str, details: dict[str, str] | None = None) -> dict:
+    return {"error": {"code": code, "message": message, **(details or {})}}
 
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, e: ApiError):
-        return JSONResponse(_body(e.code, e.message), status_code=e.status)
+        return JSONResponse(_body(e.code, e.message, e.details), status_code=e.status, headers=e.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, e: RequestValidationError):

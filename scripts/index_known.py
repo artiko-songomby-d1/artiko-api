@@ -31,7 +31,7 @@ FAMOUS = [
      "https://www.wikidata.org/wiki/Q151047",
      "Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg"),
 ]
-MET = "https://collectionapi.metmuseum.org/public/collection/v1"
+MET = "https://collectionapi.metmuseum.org/public/collection"
 HEADERS = {"User-Agent": "ArtikoHackathon/0.1 (public-domain art index)"}
 
 
@@ -42,16 +42,39 @@ async def famous():
 
 
 async def met(client: httpx.AsyncClient, limit: int):
-    r = await client.get(f"{MET}/search", params={"q": "painting", "hasImages": "true", "isPublicDomain": "true"})
-    for object_id in (r.json().get("objectIDs") or [])[: limit * 2]:
-        o = (await client.get(f"{MET}/objects/{object_id}")).json()
-        if o.get("isPublicDomain") and o.get("primaryImageSmall"):
-            yield KnownWork(title=o["title"][:300], artist_name=o.get("artistDisplayName") or "Unknown artist",
-                            date=o.get("objectDate", ""), museum="The Metropolitan Museum of Art, New York",
-                            source_url=o["objectURL"], image_url=o["primaryImageSmall"], embedding=[])
-            limit -= 1
-            if limit <= 0:
-                return
+    candidate_count = min(limit * 2, 10_000)
+    for offset in range(0, candidate_count, 500):
+        page_size = min(500, candidate_count - offset)
+        search = await client.get(
+            f"{MET}/v1.1/search",
+            params={"q": "painting", "hasImages": "true", "offset": offset, "limit": page_size},
+        )
+        search.raise_for_status()
+        page = search.json()
+        object_ids = page["objectIDs"] or []
+        for object_id in object_ids:
+            try:
+                response = await client.get(f"{MET}/v1/objects/{object_id}")
+                response.raise_for_status()
+                work = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                print(f"skip Met object {object_id}: {exc}")
+                continue
+            if work.get("isPublicDomain") and work.get("primaryImageSmall"):
+                yield KnownWork(
+                    title=work["title"][:300],
+                    artist_name=work.get("artistDisplayName") or "Unknown artist",
+                    date=work.get("objectDate", ""),
+                    museum="The Metropolitan Museum of Art, New York",
+                    source_url=work["objectURL"],
+                    image_url=work["primaryImageSmall"],
+                    embedding=[],
+                )
+                limit -= 1
+                if limit == 0:
+                    return
+        if offset + len(object_ids) >= page["total"]:
+            return
 
 
 async def main(met_limit: int) -> None:

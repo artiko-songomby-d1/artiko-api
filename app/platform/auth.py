@@ -1,6 +1,7 @@
 """Verify the Better Auth JWTs (issued by artiko-web) against its JWKS endpoint."""
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -12,8 +13,9 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.platform.config import get_settings
-from app.platform.errors import Unauthorized
+from app.platform.errors import Forbidden, Unauthorized
 
+log = logging.getLogger(__name__)
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -65,6 +67,12 @@ class CurrentUser:
     id: str
     email: str | None
     name: str | None
+    # Reviewers may open private proofs and work the review queue. The API designates them (REVIEWER_USER_IDS):
+    # Better Auth issues no role claim, so a claim in the token is never trusted.
+    is_reviewer: bool = False
+    # Better Auth copies the user into the token, `emailVerified` included. False when the claim is missing:
+    # a token that says nothing about the email proves nothing about it.
+    email_verified: bool = False
 
 
 async def decode_token(token: str) -> CurrentUser:
@@ -78,9 +86,18 @@ async def decode_token(token: str) -> CurrentUser:
             audience=s.auth_audience,
             options={"require": ["sub", "exp"]},
         )
-    except jwt.PyJWTError as e:
-        raise Unauthorized("invalid_token", f"Invalid token: {e}") from e
-    return CurrentUser(id=claims["sub"], email=claims.get("email"), name=claims.get("name"))
+    except jwt.PyJWTError as error:
+        # Exception messages may contain token-controlled data, such as the signing key ID.
+        log.debug("JWT validation failed (%s)", type(error).__name__)
+        raise Unauthorized("invalid_token", "Invalid token") from error
+    return CurrentUser(
+        id=claims["sub"],
+        email=claims.get("email"),
+        name=claims.get("name"),
+        is_reviewer=claims["sub"] in s.reviewer_user_id_set,
+        # Only the boolean true counts: the string "true" or 1 could come from a field a user controls.
+        email_verified=claims.get("emailVerified") is True,
+    )
 
 
 async def current_user(
@@ -91,4 +108,21 @@ async def current_user(
     return await decode_token(creds.credentials)
 
 
+async def optional_user(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> CurrentUser | None:
+    """The signed-in user, or None for an anonymous visitor; a token that is present but wrong still answers 401."""
+    return None if creds is None else await decode_token(creds.credentials)
+
+
 User = Annotated[CurrentUser, Depends(current_user)]
+OptionalUser = Annotated[CurrentUser | None, Depends(optional_user)]
+
+
+async def current_reviewer(user: User) -> CurrentUser:
+    if not user.is_reviewer:
+        raise Forbidden("not_a_reviewer", "Only reviewers may do this")
+    return user
+
+
+Reviewer = Annotated[CurrentUser, Depends(current_reviewer)]

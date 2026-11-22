@@ -16,8 +16,11 @@ from sqlalchemy import delete, select
 
 from app.features.artists.models import Artist
 from app.features.practices.models import Practice
-from app.features.works.models import Exposition, Vote, Work
-from app.platform import storage
+from app.features.works.models import Exposition, Vote, Work, WorkProof
+from app.platform import (
+    registry,  # noqa: F401  registers tables referenced by foreign keys
+    storage,
+)
 from app.platform.db import get_sessionmaker
 from app.platform.embed import embed
 from app.platform.months import current_month
@@ -67,7 +70,6 @@ async def main() -> None:
                                     learners=learners, median_age=age, description=description))
         await db.execute(delete(Artist).where(Artist.user_id.like("demo-%")))
         await db.execute(delete(Vote).where(Vote.user_id.like("demo-voter-%")))
-        await db.commit()
 
         month = current_month()
         works = []
@@ -83,10 +85,12 @@ async def main() -> None:
             await db.flush()
             for i in range(5):
                 data = placeholder(a * 100 + i, category)
-                proofs = [storage.save(placeholder(a * 100 + i + 50 + p, category), ".jpg") for p in range(2)]
+                proof_paths = [storage.save(placeholder(a * 100 + i + 50 + p, category), ".jpg") for p in range(2)]
+                proofs = [WorkProof(path=path, visibility="public") for path in proof_paths]
                 work = Work(artist_id=artist.id, exposition_id=expositions[i // 3].id,
-                            title=f"{name.split()[0]} study {i + 1}", story=f"Demo work {i + 1} by {name}.", category=category,
-                            media_path=storage.save(data, ".jpg"), media_kind="image", proof_paths=proofs,
+                            title=f"{name.split()[0]} study {i + 1}", story=f"Demo work {i + 1} by {name}.",
+                            category=category,
+                            media_path=storage.save(data, ".jpg"), media_kind="image", proofs=proofs,
                             sha256=storage.sha256(data), ai_declared=False, human_proven=True, month=month,
                             embedding=embed(data).tolist())
                 db.add(work)

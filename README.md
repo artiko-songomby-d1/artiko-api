@@ -4,26 +4,27 @@ FastAPI backend for the Artiko Android and web apps. The contract is [`openapi.y
 
 ## Setup
 
-1. Create two Neon databases (dev and test) and copy `.env.example` to `.env` with their URLs in `DATABASE_URL` and `TEST_DATABASE_URL`.
-2. Install, migrate, get the CLIP model, seed:
+Install Go Task and Docker with Compose v2.24 or newer, then run `task up`. Docker builds the API image with the locked dependencies and CLIP model, starts a local PostgreSQL database, applies migrations, and waits for the API and its database connection to be ready at `http://127.0.0.1:8000/api/v1/ready`.
 
-```
-uv sync
-uv run alembic upgrade head
-uv run python -m scripts.download_model
-uv run python -m scripts.seed_demo
-uv run python -m scripts.index_known --met 200
-uv run uvicorn app.main:app --reload
-```
+If port 8000 is in use, run `ARTIKO_PORT=8001 task up` to serve the API on port 8001.
+
+The stack works without a `.env` file. To use Neon, set `DATABASE_URL` to your development database in `.env`. Run `task seed` after startup to recreate the demo artists and index known works in the configured database. `task down` stops the stack and keeps the local database and uploads in Docker volumes.
+
+For auto-reload outside Docker, install `uv`, configure `DATABASE_URL` for a database reachable from your host, then run `uv sync`, `uv run alembic upgrade head`, `uv run python -m scripts.download_model`, and `task run`.
 
 ## Tests
 
-```
-uv run ruff check .
-uv run pytest
+With `uv` installed, run lint and the full test suite with `task` (or `task check`).
+
+```sh
+task lint                          # Ruff only
+task test                          # Full pytest suite
+task test -- tests/test_health.py  # Run a single test file
 ```
 
-Tests run on `TEST_DATABASE_URL` (every table is truncated between tests) and never call the network: the JWT key is generated locally and embeddings use `EMBED_PROVIDER=none`.
+Set `TEST_DATABASE_URL` in `.env` or in your shell to a dedicated PostgreSQL test database. The suite applies migrations and truncates tables between tests. It uses a local JWT key and sets `EMBED_PROVIDER=none`.
+
+Set `TEST_RATE_LIMIT_REDIS_URL` to a dedicated Redis test instance to run the shared rate limiter integration test.
 
 ## Deploy (Render)
 
@@ -35,9 +36,32 @@ Tests run on `TEST_DATABASE_URL` (every table is truncated between tests) and ne
 | `AUTH_JWKS_URL` | `https://<web app>/api/auth/jwks` |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE`, `PUBLIC_WEB_URL`, `CORS_ORIGINS` | `https://<web app>` |
 | `PUBLIC_API_URL` | `https://<this service>.onrender.com` |
+| `REVIEWER_USER_IDS` | Comma-separated Better Auth user ids of the reviewers; empty (the default) means nobody. The API never trusts a role claim in the token. Add it in the dashboard on an existing service |
 | `MEDIA_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Neon Object Storage bucket and its storage credential |
 
+Proof files are private by default (`proof_visibility=reviewers` when publishing; `public` shows them to everyone). Private proofs are stored under the `private/` prefix of the bucket or of `MEDIA_DIR`, which `/media` never serves, and are opened only through signed links that expire after `PROOF_URL_TTL_SECONDS` (300). `WorkOut.proof_urls` lists the links the caller may use: the owner and the reviewers get the private ones, everybody else only the public ones. Set `PROOF_URL_SECRET` (a long random string); without it no private link is issued. `GET /proofs/{id}/file` is public, since the signature is the credential, and is rate limited by `PROOF_RATE_LIMIT_PER_MINUTE` (60) and `PROOF_GLOBAL_RATE_LIMIT_PER_MINUTE` (600).
+
+Publishing checks every image for copies. Its CLIP vector must stay under `PUBLISH_DUPLICATE_THRESHOLD` (0.92) of other artists' works and of known works, and its perceptual hash (pHash, 64 bits) within `PUBLISH_PHASH_MAX_DISTANCE` (8) bits is also a copy: the answer is 409 `possible_copy` with the id of a review case. Refusals do not pile up cases: the same file refused again (same artist, same SHA-256) answers with the case already open, or with the confirmed one once a reviewer confirmed it as a copy, and an artist who already has `REVIEW_MAX_OPEN_CASES_PER_ARTIST` (20) open cases gets the latest one instead of a new one. Reviewers, the Better Auth user ids listed in `REVIEWER_USER_IDS`, list the cases with `GET /api/v1/review/cases` (`status` open by default, paged) and decide one with `POST /api/v1/review/cases/{id}/decision` and `{"decision": "cleared" | "confirmed"}`. `cleared` lets the same artist publish that exact file (same SHA-256); `confirmed` keeps it refused. Only an open case can be decided (409 otherwise). Similar to the artist's own earlier work: accepted, and both works get the same `series_id`. The CLIP signal catches crops and photos taken at an angle; with `EMBED_PROVIDER=none` (tests) only the exact and pHash signals work.
+
+Captures. Only proof captured in the app counts for the human-made badge. A phone first registers the P-256 key it made in the Android Keystore: `GET /devices/challenge` gives a nonce (signed with `NONCE_SECRET`, valid 10 minutes), the key is created with that nonce as attestation challenge, and `POST /devices` sends the public key and the attestation chain. With `ATTESTATION_PROVIDER=chain` the server checks the chain up to Google's roots (`app/features/devices/google_attestation_roots.pem`, from `android.googleapis.com/attestation/root`), that the leaf is the registered key, that its challenge is the nonce and that the key is hardware-backed. Each proof file is then sent with a claim (`proof_claims`) that holds the signature over `<sha256>|<captured_at_ms>|<draft_id>|<nonce>`. The nonce is required: the app asks `GET /devices/challenge` for one before capturing, and one nonce may sign all the captures of a draft while it is valid (10 minutes). The capture time comes from the phone's clock; the nonce is what proves to the server that the capture was signed in the last 10 minutes and for this account. The server refuses a bad signature, an unknown device, a capture older than `CAPTURE_MAX_AGE_MINUTES` (10), a capture dated in the future, a nonce it did not issue to this user or that has expired (400 `invalid_nonce`) and a failed integrity verdict. A signed capture proves one work only: the SHA-256 of its file is recorded in `used_capture` in the same transaction as the work, and a capture already recorded is refused with 409 `capture_already_used`, whatever the signature, the draft or the account. Two publications sent at the same instant cannot both take a capture (the primary key decides), and a publication that fails records nothing, so the artist can send the same captures again. The same capture sent twice in one publication is stored twice and counted once. Proof picked from the gallery is stored as `imported` and never counts. `INTEGRITY_PROVIDER` only knows `none` for now: the Play Integrity provider needs a Google Cloud project and is not implemented, so no real integrity verdict is checked yet. Works published before this rule keep their badge. `ALLOW_IMPORTED_PROOFS_FOR_BADGE` is a transition switch and is `true` by default, because the Android app cannot capture signed proof yet: imported proof files still count, as before. Set it to `false` to enforce the rule above. Whatever the switch, the badge takes two proof files that differ from the work and from each other: a proof with the same SHA-256, or (for images) a pHash within `PUBLISH_PHASH_MAX_DISTANCE` bits, as the work or as a proof already counted is stored but not counted. So the work itself, a resized copy of it, or one file sent twice no longer earn the badge. Limits of this rule: a proof that looks like the finished work (a late step with the same framing) does not count either, so the badge takes two proofs that clearly differ, such as a sketch and a mid-way photo; a mirrored, rotated or cropped copy of the work, and for audio, video and 3D any file whose bytes differ, still count. Only signed in-app captures close that.
+
+Attestation chain. With `ATTESTATION_PROVIDER=chain`, `POST /devices` lets the `cryptography` path validator build the path from the key's certificate to one of Google's roots. Every certificate that signs another must be a CA (`BasicConstraints` with `cA`, `keyCertSign` when it has a `KeyUsage`, `pathLenConstraint` honoured) and valid now, and only the key's own certificate may carry the attestation extension. So the attested key of a phone cannot be used as a CA to forge an attestation for another key. The root that counts is the one in this repository: the copy a phone sends, often an older issue of the same root, is ignored. No certificate of the chain may be on Google's list of revoked attestation keys (`ATTESTATION_REVOCATION_URL`, by default `https://android.googleapis.com/attestation/status`; empty = no check). Each API process keeps that list in memory; when it is over an hour old the next registration fetches it again (5 s timeout). If that fetch fails, the last list stays in use and the fetch is tried again after 30 s. If no list has ever been fetched, registration fails closed with `503 attestation_unavailable`, so a leaked key cannot register while Google is unreachable. Known limit: a phone whose factory certificate is not marked as a CA is refused; Google's own test chains show this on a Pixel 2 and a Sony Xperia 10 III, both with certificates that expired in May 2026. Factory certificates cannot be renewed, so a phone whose chain has expired is refused too.
+
+`POST /scan/image` is public and runs the CLIP model, so it takes photos up to 5 MB (`SCAN_MAX_UPLOAD_MB`) and is rate limited: 20 a minute per client (`SCAN_RATE_LIMIT_PER_MINUTE`) and 120 a minute for everyone (`SCAN_GLOBAL_RATE_LIMIT_PER_MINUTE`). A client is its IPv4 address or IPv6 /64 network. Behind a proxy the socket peer is the proxy itself, so set `CLIENT_IP_HEADER` to the header your host overwrites with the real client IP (never one a client can send); until then every client shares one counter and the per-client limit behaves like the global one. On Render that header is `CF-Connecting-IP`, which `render.yaml` sets: every public Render service sits behind Cloudflare, which writes it with one address and refuses (403, error 1000) a request that already carries it. Do not use `X-Forwarded-For` there: its first entry is whatever the client sent and its last one is a Render proxy. A header value that is not an IP address is ignored and the request falls back to the shared counter. After a deploy, check it once: two networks must get independent 429s on `POST /scan/image`.
+
+Each API process checks for scan similarity index updates every `SCAN_INDEX_REFRESH_SECONDS` (default 15 seconds) when handling scans. A successful image publication invalidates the local process's index immediately, and other processes pick up the image on their next refresh. Set the interval to `0` to refresh on every scan. Publication checks always refresh before matching. A refresh also drops works that were deleted from the database (one count query; the list of ids is read only when the count disagrees with the index), and a scan that matches a row deleted since the last refresh forgets it and answers with the next closest image or `unknown`. The index stays a per-process copy: instances can disagree for up to that interval.
+
+The write endpoints that need a token are rate limited for each user (the JWT `sub`, not the address, so people who share a network do not share a counter) and for everyone together: `POST /works` 10 and 60 a minute (`WORK_RATE_LIMIT_PER_MINUTE`, `WORK_GLOBAL_RATE_LIMIT_PER_MINUTE`), `POST /votes` 30 and 600 (`VOTE_*`), `PUT /me/artist` 10 and 120 (`ARTIST_*`), `POST /expositions` 10 and 120 (`EXPOSITION_*`). Refused requests count; a request without a valid token is answered 401 and counts nowhere. The global cap is what holds when somebody uses many accounts. Against throwaway accounts that vote, `REQUIRE_VERIFIED_EMAIL_TO_VOTE=true` refuses a vote (403 `email_not_verified`) unless the token carries `emailVerified: true`, which Better Auth copies from the user. It is `false` by default: the web app does not verify emails at sign-up yet, so turning it on now would stop every vote.
+
+With `RATE_LIMIT_REDIS_URL` unset, the scan, signed proof download, device and write endpoints above keep process-local counters. For multiple API instances, set the same Redis URL on each instance (in Render, add it in the service's Environment settings), for example `rediss://<host>:6379/0` for a TLS-enabled Redis service. Use a separate Redis database or instance per API environment so its counters stay independent. The limited endpoints return `503 rate_limit_unavailable` until a configured Redis service is reachable.
+
+Pictures are checked before they are decoded, when publishing (the work, its proofs, the poster) and when scanning. Only JPEG, PNG and WebP are opened, and a published file must be sent with the content type its bytes really are (400 `unsupported_file` otherwise), since that type decides the extension it is stored under. The pixel count is read from the header, and a picture too large to decode is refused with 413 `image_too_large`. `MAX_IMAGE_MEGAPIXELS` (17) is what may be decoded at full size: decoding takes about 6 MB per megapixel and one picture is decoded at a time per process, so about 100 MB, next to the 330 MB the API takes once the CLIP model is loaded (measured in a python:3.14-slim container; the free instance has 512 MB). A larger JPEG is decoded at 1/2, 1/4 or 1/8 of its size, which the format allows, so phone photos of 24, 50 or 64 megapixels pass, up to 89 megapixels, where Pillow's own bomb warning starts. The other pictures can only be decoded whole and get the pixels that fit in the same memory: PNG 17 megapixels, transparent PNG 12.7, WebP 6, transparent WebP 5.1; a progressive JPEG, which the decoder holds whole before decoding it, 14.4.
+
 Uploads go to the bucket when `MEDIA_BUCKET` is set (local `MEDIA_DIR` otherwise) and are served by the API at `/media/<sha256>.<ext>`. A free instance sleeps after 15 idle minutes: open `/api/v1/health` a minute before a demo.
+
+## Pagination
+
+`GET /api/v1/expositions` and `GET /api/v1/artists/{artist_id}/museum` accept `limit` (default 100, maximum 200) and `offset` (default 0). Increase `offset` by `limit` to fetch the next page. Expositions are listed newest first. The museum selects an artist's works oldest first and lays out a separate room for each page.
 
 ## Layout
 
