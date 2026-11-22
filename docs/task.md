@@ -86,9 +86,8 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
   dans les logs.
 - [ ] **23. Rate limit en mémoire par processus** (`rate_limit.py:3`, assumé) : partager les compteurs
   (Redis) si plusieurs instances.
-- [ ] **24. Dépendances déclarées mais non importées** : `celery`, `redis`, `sse-starlette`, `pyacoustid`
-  et `pgvector` n'apparaissent dans aucun import de `app/` ni `scripts/` (`grep`). Les retirer allège
-  l'image et la surface d'attaque.
+- [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `redis`, `sse-starlette`,
+  `pyacoustid` et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`.
 
 ## Ordre suggéré
 
