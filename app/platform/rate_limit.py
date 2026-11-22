@@ -5,6 +5,7 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
 from hashlib import sha256
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, Request
@@ -13,6 +14,7 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
 
+from app.platform.auth import User
 from app.platform.config import get_settings
 from app.platform.errors import ServiceUnavailable, TooManyRequests
 
@@ -148,13 +150,24 @@ def client_key(request: Request) -> str:
     return normalise(request.client.host) if request.client else "unknown"
 
 
-def limit_per_minute(
-    bucket: str, limiter: SlidingWindowLimiter, per_client: Callable[[], int], overall: Callable[[], int]
-) -> Callable:
-    """A dependency that answers 429 once one client, or all clients together, pass their per-minute caps."""
+def user_key(user: User) -> str:
+    """The signed-in caller, for routes that require a token: people who share an address (a school, a mobile
+    carrier) keep one counter each. Without a valid token the answer is 401 and nothing is counted."""
+    return f"user:{user.id}"
 
-    async def check(request: Request) -> None:
-        client = client_key(request)
+
+def limit_per_minute(
+    bucket: str,
+    limiter: SlidingWindowLimiter,
+    per_client: Callable[[], int],
+    overall: Callable[[], int],
+    key: Callable[..., str] = client_key,
+) -> Callable:
+    """A dependency that answers 429 once one client, or all clients together, pass their per-minute caps.
+
+    `key` names the client: its address by default, `user_key` on routes that require a token."""
+
+    async def check(request: Request, client: Annotated[str, Depends(key)]) -> None:
         if get_settings().rate_limit_redis_url:
             shared = getattr(request.app.state, "rate_limiter", None)
             if shared is None:

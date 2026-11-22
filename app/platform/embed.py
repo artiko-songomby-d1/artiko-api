@@ -1,7 +1,6 @@
 """CLIP ViT-B/32 image embeddings (ONNX), used to recognise a photographed artwork."""
 
 import hashlib
-import io
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,6 +8,8 @@ import numpy as np
 from PIL import Image
 
 from app.platform.config import get_settings
+from app.platform.errors import BadRequest
+from app.platform.storage import decoding, open_image
 
 DIM = 512
 _MEAN = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
@@ -26,10 +27,19 @@ def _session():
 
 
 def _pixels(data: bytes) -> np.ndarray:
-    """CLIP preprocessing: shortest side to 224 (bicubic), centre crop, normalize, NCHW."""
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-    scale = 224 / min(img.size)
-    img = img.resize((max(224, round(img.width * scale)), max(224, round(img.height * scale))), Image.BICUBIC)
+    """CLIP preprocessing: shortest side to 224 (bicubic), centre crop, normalize, NCHW.
+    413 when the image has too many pixels to be decoded, 400 when it opens but cannot be decoded."""
+    try:
+        with decoding:
+            img = open_image(data)
+            # An RGB picture is resized as it is: converting it made a second full-size copy for nothing.
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            scale = 224 / min(img.size)
+            img = img.resize((max(224, round(img.width * scale)), max(224, round(img.height * scale))), Image.BICUBIC)
+    except (OSError, SyntaxError, ValueError) as e:
+        # A scan reaches the model without being hashed first: a photo cut short fails here, and is not a 500.
+        raise BadRequest("unsupported_file", "The image cannot be read") from e
     left, top = (img.width - 224) // 2, (img.height - 224) // 2
     arr = np.asarray(img.crop((left, top, left + 224, top + 224)), dtype=np.float32) / 255.0
     return ((arr - _MEAN) / _STD).transpose(2, 0, 1)[None]

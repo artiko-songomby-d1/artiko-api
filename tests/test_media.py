@@ -1,3 +1,5 @@
+import io
+
 from app.platform import storage
 from tests.conftest import become_artist, png, publish
 
@@ -20,11 +22,14 @@ def test_unknown_or_malformed_names_are_404(client):
 
 
 class FakeBucket:
-    """Stands in for the S3 client: put_object / get_object on a dict."""
+    """Stands in for the S3 client: put_object / head_object / get_object on a dict."""
 
     class exceptions:
         class NoSuchKey(Exception):
             pass
+
+        class ClientError(Exception):
+            response = {"ResponseMetadata": {"HTTPStatusCode": 404}}
 
     def __init__(self):
         self.objects = {}
@@ -32,15 +37,15 @@ class FakeBucket:
     def put_object(self, Bucket, Key, Body, ContentType):
         self.objects[(Bucket, Key)] = Body
 
+    def head_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.objects:
+            raise self.exceptions.ClientError()
+        return {"ContentLength": len(self.objects[(Bucket, Key)])}
+
     def get_object(self, Bucket, Key):
         if (Bucket, Key) not in self.objects:
             raise self.exceptions.NoSuchKey()
-
-        class Body:
-            def read(_):
-                return self.objects[(Bucket, Key)]
-
-        return {"Body": Body()}
+        return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
 
 def test_bucket_storage_round_trip(client, monkeypatch):

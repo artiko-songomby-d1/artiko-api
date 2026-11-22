@@ -2,8 +2,10 @@
 
 import hashlib
 import io
+import math
 import mimetypes
 import re
+import threading
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
@@ -40,12 +42,100 @@ async def read_upload(file: UploadFile, max_mb: int | None = None) -> bytes:
     return data
 
 
-def is_image(data: bytes) -> bool:
+# The pictures accepted, by Pillow's name for the format, and the content type each one is. An "MPO" is a JPEG
+# that carries a second picture after the first, such as the HDR gain map of recent Android cameras.
+IMAGE_TYPES = {"JPEG": "image/jpeg", "MPO": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+
+# Megabytes of memory a decode takes per megapixel at its peak, measured with Pillow 13 on the pHash and CLIP
+# paths: the decoded pixels, the decoder's own buffers and the copy a conversion makes. MAX_IMAGE_MEGAPIXELS
+# counts megapixels of a plain photo; any other picture gets as many pixels as fit in the same memory.
+PHOTO_COST = 6  # a JPEG or an opaque PNG
+TRANSPARENT_COST = 8  # the layer and the backdrop it is laid on
+WEBP_COST, TRANSPARENT_WEBP_COST = 17, 20  # Pillow decodes a WebP through two more full-size buffers of its own
+# A JPEG sent in several scans (progressive, or one colour at a time) is held whole as coefficients before the
+# first pixel comes out, at whatever size it is then decoded.
+JPEG_COEFFICIENTS_COST = 7
+# The JPEG decoder can build the picture at a fraction of its size, without ever holding it whole.
+JPEG_SCALES = (1, 2, 4, 8)
+
+# One picture is decoded at a time. The pixel limit bounds the memory of one decode: without this lock, ten
+# uploads decoded together would take ten times as much.
+decoding = threading.Lock()
+
+
+def _single_scan(data: bytes) -> bool:
+    """Whether the first scan of a JPEG carries all its colours, as a camera writes it: the decoder then works
+    row by row. Read from the segments that come before the pixels; anything unexpected counts as several scans."""
+    position, colours = 2, None
     try:
-        Image.open(io.BytesIO(data)).verify()
-        return True
-    except (UnidentifiedImageError, OSError, SyntaxError):
-        return False
+        for _ in range(1000):  # a real file has a few dozen segments before its pixels
+            marker, length = data[position + 1], int.from_bytes(data[position + 2 : position + 4], "big")
+            if data[position] != 0xFF or length < 2:
+                break
+            if marker in (0xC0, 0xC1):  # the frame header of a sequential JPEG (a progressive one has 0xC2)
+                colours = data[position + 9]
+            elif marker == 0xDA:  # start of scan
+                return data[position + 4] == colours
+            position += 2 + length
+    except IndexError:
+        pass
+    return False
+
+
+def open_image(data: bytes, name: str | None = None) -> Image.Image:
+    """An uploaded picture, opened but not decoded: only its header has been read. Every decoder starts here, so
+    that none is handed a decompression bomb, a small file that unpacks into gigabytes of pixels.
+    UnidentifiedImageError when the bytes are not a JPEG, PNG or WebP; 413 when the picture has too many pixels.
+    A JPEG over the limit comes back set to be decoded at 1/2, 1/4 or 1/8 of its size: see its `size`."""
+    name = name or "The picture"
+    try:
+        # Only these decoders are tried: a GIF, BMP or TIFF is not a picture here, whatever Pillow can open.
+        # (The JPEG one is also the one that opens an MPO.)
+        image = Image.open(io.BytesIO(data), formats=("JPEG", "PNG", "WEBP"))
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+        # Pillow's own guard (an error from 178 megapixels, a warning from 89 that `python -W error` raises).
+        raise PayloadTooLarge("image_too_large", f"{name} has too many pixels") from e
+    megapixels = image.width * image.height / 1_000_000
+    budget = get_settings().max_image_megapixels * PHOTO_COST
+    held = None  # megabytes per megapixel a JPEG takes before it is decoded at all
+    if image.format == "WEBP":
+        kind, cost = ("transparent WebP", TRANSPARENT_WEBP_COST) if image.has_transparency_data else ("WebP", WEBP_COST)
+    elif image.format == "PNG":
+        kind, cost = ("transparent PNG", TRANSPARENT_COST) if image.has_transparency_data else ("PNG", PHOTO_COST)
+    else:
+        held = 0 if _single_scan(data) else JPEG_COEFFICIENTS_COST
+        kind, cost = "progressive JPEG" if held else "JPEG", held + PHOTO_COST / JPEG_SCALES[-1] ** 2
+    # Never past the size from which Pillow warns of a bomb, whatever the setting.
+    limit = min(budget / cost, (Image.MAX_IMAGE_PIXELS or math.inf) / 1_000_000)
+    if megapixels > limit:
+        raise PayloadTooLarge(
+            "image_too_large",
+            f"{name} has {megapixels:.1f} megapixels ({image.width} x {image.height}): "
+            f"at most {limit:.1f} are accepted for a {kind}",
+        )
+    if held is not None:
+        # A phone photo of 50 megapixels is decoded as one of 12.5, which is plenty for a hash and for CLIP.
+        fits = (scale for scale in JPEG_SCALES if megapixels * (held + PHOTO_COST / scale**2) <= budget)
+        scale = next(fits, JPEG_SCALES[-1])
+        if scale > 1:
+            image.draft(None, (max(1, image.width // scale), max(1, image.height // scale)))
+    return image
+
+
+def image_type(data: bytes, name: str | None = None) -> str | None:
+    """The content type the bytes really are ("image/png"), or None when they are not a JPEG, PNG or WebP.
+    413 when the picture has too many pixels to be decoded."""
+    try:
+        image = open_image(data, name)
+        image.verify()
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError):
+        # ValueError: a PNG text chunk that unpacks over Pillow's limit, a bomb of its own.
+        return None
+    return IMAGE_TYPES.get(image.format)
+
+
+def is_image(data: bytes) -> bool:
+    return image_type(data) is not None
 
 
 def _is_mp3(data: bytes) -> bool:
@@ -67,7 +157,11 @@ SIGNATURES: dict[str, Callable[[bytes], bool]] = {
 def kind_of(file: UploadFile, data: bytes) -> tuple[str, str]:
     """(media kind, file extension), or 400 when the type is not accepted or the bytes lie."""
     kind, ext = TYPES.get(file.content_type or "", (None, None))
-    ok = kind is not None and (is_image(data) if kind == "image" else SIGNATURES[ext](data))
+    found = image_type(data, file.filename) if kind == "image" else None
+    if found and found != file.content_type:
+        # The extension it is stored under, and so the type it is served as, come from the declared type.
+        raise BadRequest("unsupported_file", f"{file.filename} was sent as {file.content_type} but is {found}")
+    ok = kind is not None and (found is not None if kind == "image" else SIGNATURES[ext](data))
     if not ok:
         raise BadRequest("unsupported_file", f"{file.filename}: type {file.content_type} is not accepted")
     return kind, ext
@@ -137,5 +231,56 @@ def load(name: str, private: bool = False) -> bytes | None:
     return path.read_bytes() if path.is_file() else None
 
 
+def size(name: str, private: bool = False) -> int | None:
+    """The stored file's length in bytes, or None when the name is not a stored file."""
+    if not NAME.match(name):
+        return None
+    key = f"{PRIVATE_PREFIX}{name}" if private else name
+    bucket = get_settings().media_bucket
+    if bucket:
+        client = bucket_client()
+        try:
+            return client.head_object(Bucket=bucket, Key=key)["ContentLength"]
+        except client.exceptions.ClientError as e:
+            # A HEAD answer has no body, so botocore cannot name the error NoSuchKey: only the status tells.
+            if e.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
+                return None
+            raise
+    path = Path(get_settings().media_dir) / key
+    return path.stat().st_size if path.is_file() else None
+
+
+def open_range(name: str, first: int = 0, last: int | None = None, private: bool = False) -> io.IOBase | None:
+    """An open stream placed on byte `first` of a stored file, or None when the name is not a stored file.
+
+    The caller reads up to byte `last` included (None = the end of the file) and closes the stream, so a video
+    is served piece by piece and never held whole in memory. The bucket cuts the range itself and its stream ends
+    after `last`; a local file does not stop there, the caller counts the bytes.
+    """
+    if not NAME.match(name):
+        return None
+    key = f"{PRIVATE_PREFIX}{name}" if private else name
+    bucket = get_settings().media_bucket
+    if bucket:
+        client = bucket_client()
+        # A whole file is asked without Range: S3 answers 416 to any range on an empty object.
+        asked = {} if (first, last) == (0, None) else {"Range": f"bytes={first}-{'' if last is None else last}"}
+        try:
+            return client.get_object(Bucket=bucket, Key=key, **asked)["Body"]
+        except client.exceptions.NoSuchKey:
+            return None
+    path = Path(get_settings().media_dir) / key
+    if not path.is_file():
+        return None
+    file = path.open("rb")
+    file.seek(first)
+    return file
+
+
 def media_url(path: str) -> str:
     return f"{get_settings().public_api_url}/media/{path}"
+
+
+def stored_name(fingerprint: str, ext: str) -> str:
+    """The name `save` gives to the bytes with this SHA-256: known before anything is written."""
+    return f"{fingerprint}{ext}"

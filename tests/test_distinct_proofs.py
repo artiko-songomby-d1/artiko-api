@@ -73,8 +73,9 @@ def test_the_same_signed_capture_sent_twice_counts_once(client):
     device_id, key = register_device(client, "alice")
     claims = [signed_claim(device_id, key, SKETCH), signed_claim(device_id, key, SKETCH)]
     assert publish(client, WORK, [SKETCH, SKETCH], claims=claims)["human_proven"] is False
-    claims = [signed_claim(device_id, key, SKETCH), signed_claim(device_id, key, STEP)]
-    assert publish(client, encode(art(5)), [SKETCH, STEP], claims=claims)["human_proven"] is True
+    # Other captures than SKETCH, which now proves the work above: a signed capture proves one work only.
+    claims = [signed_claim(device_id, key, STEP), signed_claim(device_id, key, DETAIL)]
+    assert publish(client, encode(art(5)), [STEP, DETAIL], claims=claims)["human_proven"] is True
 
 
 def test_a_picture_that_cannot_be_decoded_is_refused_as_a_proof(client, imported_proofs_count):
