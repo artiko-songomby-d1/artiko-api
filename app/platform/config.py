@@ -1,10 +1,13 @@
 from functools import lru_cache
+from typing import Literal, Self
 
+from pydantic import Field, NonNegativeInt, PositiveInt, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Validation errors name the variable, never its value: a start-up log must not print a secret.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # Neon connection string, from .env. No default: the app refuses to start without a database.
     database_url: str
@@ -16,6 +19,8 @@ class Settings(BaseSettings):
     auth_issuer: str = "http://localhost:3000"
     auth_audience: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
+    # Comma-separated Better Auth user ids allowed to review. Empty = nobody.
+    reviewer_user_ids: str = ""
 
     media_dir: str = "media"
     # S3-compatible bucket for uploads (Neon Object Storage). Empty = files stay on local disk in MEDIA_DIR.
@@ -26,7 +31,14 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     # Public base URL of this API, used to build absolute media links for the apps.
     public_api_url: str = "http://localhost:8000"
-    max_upload_mb: int = 20
+    max_upload_mb: int = 60
+    # Megapixels of a picture that may be decoded at full size, checked on its header before a pixel is decoded: a
+    # few hundred kilobytes can announce gigabytes of pixels. Decoding takes 6 MB a megapixel and one picture is
+    # decoded at a time, so 17 cost about 100 MB, on top of the 330 MB the API takes with the CLIP model loaded
+    # (512 MB instance). A larger JPEG is decoded at 1/2, 1/4 or 1/8 of its size, so phone photos of 24 to 64
+    # megapixels pass; a PNG or WebP cannot be, and is refused. Pictures that take more memory per pixel get
+    # fewer: transparent PNG 3/4 of this, WebP 1/3 (see storage.open_image).
+    max_image_megapixels: int = 17
     # Secret that signs the short-lived links to reviewer-only proof files. Empty = no private link is issued.
     proof_url_secret: str = ""
     proof_url_ttl_seconds: int = 300
@@ -38,25 +50,57 @@ class Settings(BaseSettings):
     scan_rate_limit_per_minute: int = 20
     # All clients together: the CLIP model is the bottleneck, so a client rotating IPs still cannot exceed this.
     scan_global_rate_limit_per_minute: int = 120
-    # Header the hosting proxy overwrites with the client IP (e.g. x-real-ip). Empty = the socket peer.
-    # Never name a header a client can send itself, or the rate limit can be dodged.
+    # POST /works reads every file into memory (up to 8 files of MAX_UPLOAD_MB) and runs the CLIP model. It requires
+    # a token, so the limit follows the user, not the address. Nobody publishes 10 works a minute by hand.
+    work_rate_limit_per_minute: int = 10
+    # All users together: what the instance can take, so many accounts still cannot exceed it.
+    work_global_rate_limit_per_minute: int = 60
+    # POST /votes, per user: a voter has 8 votes a month (one per category), so 30 tries a minute is far above use.
+    vote_rate_limit_per_minute: int = 30
+    vote_global_rate_limit_per_minute: int = 600
+    # Only accounts whose email is verified may vote: one vote per person means little when anybody can open
+    # ten accounts with made-up addresses. Off until the web app verifies emails at sign-up; turning it on
+    # before that would stop every vote, since no account would be verified.
+    require_verified_email_to_vote: bool = False
+    # PUT /me/artist, per user: a profile is edited a few times in a row at most.
+    artist_rate_limit_per_minute: int = 10
+    artist_global_rate_limit_per_minute: int = 120
+    # POST /expositions, per user: every call adds a row, and an artist creates a handful of them in all.
+    exposition_rate_limit_per_minute: int = 10
+    exposition_global_rate_limit_per_minute: int = 120
+    # Header the hosting proxy overwrites with the client IP. Empty = the socket peer. On Render it is
+    # CF-Connecting-IP (see render.yaml): Cloudflare refuses a request that already carries it.
+    # Never name a header a client can send itself (X-Forwarded-For), or the rate limit can be dodged.
     client_ip_header: str = ""
+    # All API instances share rate limits when they use the same Redis URL.
+    rate_limit_redis_url: str = ""
 
     models_dir: str = "models"
     # Cosine similarity above which a scanned photo is the same work (CLIP ViT-B/32).
     scan_match_threshold: float = 0.85
+    # Seconds before a scan checks the database for index updates again. Zero refreshes every scan.
+    scan_index_refresh_seconds: NonNegativeInt = 15
     # Where the web app lives (links in scan sources).
     public_web_url: str = "http://localhost:3000"
     # Publishing is refused when the image is this similar (CLIP cosine) to another artist's work or a known work.
     publish_duplicate_threshold: float = 0.92
     # ...or when its perceptual hash differs by at most this many of 64 bits (crops, resizes, recompression).
     publish_phash_max_distance: int = 8
-    # Secret that signs the server nonces a phone puts into its key attestation. Empty = devices cannot register.
+    # Open possible-copy review cases one artist can have. Past it a refused publication names the latest one
+    # instead of adding a row, so changing a byte of the file each time cannot fill the review queue.
+    review_max_open_cases_per_artist: PositiveInt = 20
+    # Secret that signs the server nonces a phone puts into its key attestation and into each capture it signs.
+    # Empty = devices cannot register and no capture is accepted.
     nonce_secret: str = ""
     # "chain" verifies the Android key attestation chain against Google's roots; "none" accepts any chain (tests, demo).
     attestation_provider: str = "chain"
-    # Extra PEM roots trusted besides Google's (private test CAs only).
+    # Extra PEM roots trusted besides Google's (private test CAs only). Like every signer of the chain, a root
+    # must be a CA certificate (BasicConstraints).
     attestation_extra_roots_pem: str = ""
+    # Google's list of revoked attestation certificates (leaked keys), checked by the "chain" provider. It is kept
+    # in memory and refetched hourly; a failed refetch keeps the last list. Until a first list is fetched, devices
+    # cannot register (503 attestation_unavailable). Empty = no revocation check.
+    attestation_revocation_url: str = "https://android.googleapis.com/attestation/status"
     # "none" accepts every integrity token except the literal "fail"; no other provider is implemented yet.
     integrity_provider: str = "none"
     # Transition switch, true until the Android app can capture signed proof: imported proof files still count for
@@ -69,6 +113,37 @@ class Settings(BaseSettings):
     device_global_rate_limit_per_minute: int = 200
     # "clip" runs the ONNX model; "none" gives a deterministic stand-in vector (tests, no model).
     embed_provider: str = "clip"
+    # "sightengine" asks Sightengine's genai model whether an undeclared work's main file is AI-generated;
+    # "none" checks nothing (tests, local development).
+    ai_detection_provider: Literal["none", "sightengine"] = "none"
+    sightengine_user: str = ""
+    sightengine_secret: SecretStr = SecretStr("")
+    # A main file whose AI score (the highest frame score of a video) reaches this is refused.
+    ai_detection_threshold: float = Field(0.8, gt=0, le=1, allow_inf_nan=False)
+    # Longest wait for a turn at Sightengine (1 request per second on the free plan) before the file is accepted.
+    ai_detection_wait_seconds: float = Field(30, ge=0, allow_inf_nan=False)
+    # Video checks running at once: each runs ffmpeg, the largest memory user of a check; the others wait.
+    ai_detection_max_video_checks: int = Field(1, ge=1)
+    # POST /works per user and for everyone, per minute, while Sightengine checks spend the free quota.
+    works_rate_limit_per_minute: int = Field(10, ge=1)
+    works_global_rate_limit_per_minute: int = Field(30, ge=1)
+    # prlimit --data cap of each ffprobe and ffmpeg process, in MiB: the measured need of a noisy 4K MP4 (202 MiB with
+    # Debian 13's ffmpeg 7.1) plus a margin.
+    ai_detection_ffmpeg_memory_mb: int = Field(272, ge=1)
+
+    @field_validator("sightengine_user", "sightengine_secret", mode="before")
+    @classmethod
+    def _trimmed(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _ai_detection_has_credentials(self) -> Self:
+        if self.ai_detection_provider == "sightengine":
+            if not self.sightengine_user:
+                raise ValueError("SIGHTENGINE_USER is required when AI_DETECTION_PROVIDER=sightengine")
+            if not self.sightengine_secret.get_secret_value():
+                raise ValueError("SIGHTENGINE_SECRET is required when AI_DETECTION_PROVIDER=sightengine")
+        return self
 
     @property
     def async_database_url(self) -> str:
@@ -77,6 +152,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def reviewer_user_id_set(self) -> frozenset[str]:
+        return frozenset(i.strip() for i in self.reviewer_user_ids.split(",") if i.strip())
 
 
 @lru_cache

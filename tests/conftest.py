@@ -23,13 +23,17 @@ if not _test_url:
 os.environ["DATABASE_URL"] = _test_url
 os.environ["DB_POOL"] = "false"
 os.environ["EMBED_PROVIDER"] = "none"
+os.environ["AI_DETECTION_PROVIDER"] = "none"
 os.environ["PROOF_URL_SECRET"] = "test-secret-not-for-production"
 os.environ["NONCE_SECRET"] = "test-nonce-secret-not-for-production"
 os.environ["ATTESTATION_PROVIDER"] = "none"
+os.environ["ATTESTATION_REVOCATION_URL"] = ""  # Google's revocation list is never fetched in tests
 os.environ["ALLOW_IMPORTED_PROOFS_FOR_BADGE"] = "false"  # tests enforce the strict rule
 os.environ["MEDIA_DIR"] = str(Path(__file__).parent / ".media")
 # A developer's .env may name the real bucket: tests always use local disk.
 os.environ["MEDIA_BUCKET"] = ""
+os.environ["RATE_LIMIT_REDIS_URL"] = ""
+os.environ["REVIEWER_USER_IDS"] = ""  # reviewers are granted per test, never from a developer's .env
 
 import jwt
 import pytest
@@ -43,6 +47,7 @@ from app.platform import auth as security
 from app.platform import registry  # noqa: F401  registers every table
 from app.platform.config import get_settings
 from app.platform.db import Base
+from app.platform.nonces import issue as issue_nonce
 
 _key = Ed25519PrivateKey.generate()
 
@@ -75,6 +80,14 @@ def _clean_db():
 
     device_limiter.reset()
     proof_limiter.reset()
+    from app.features.expositions.router import limiter as exposition_limiter
+    from app.features.me.router import artist_limiter
+    from app.features.votes.router import limiter as vote_limiter
+    from app.features.works.router import work_limiter
+    from app.platform.ai_detection import check_limiter
+
+    for write_limiter in (work_limiter, vote_limiter, artist_limiter, exposition_limiter, check_limiter):
+        write_limiter.reset()
     yield
 
 
@@ -96,6 +109,16 @@ def auth(user_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {make_token(user_id)}"}
 
 
+REVIEWER = "rev"
+
+
+@pytest.fixture
+def reviewer(monkeypatch) -> dict[str, str]:
+    """Headers of a user the API designates as reviewer through REVIEWER_USER_IDS."""
+    monkeypatch.setattr(get_settings(), "reviewer_user_ids", REVIEWER)
+    return auth(REVIEWER)
+
+
 @pytest.fixture
 def client():
     from app.main import app
@@ -111,6 +134,27 @@ def png(seed: int, size: tuple[int, int] = (64, 48)) -> bytes:
 
     buf = io.BytesIO()
     Image.new("RGB", size, ((seed * 37) % 256, (seed * 91) % 256, (seed * 53) % 256)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def sketch(seed: int, size: int = 96) -> bytes:
+    """A small drawing, distinct per seed. Unlike `png`, a flat colour, two sketches also look different to the
+    perceptual hash, which proof files must do to count for the badge."""
+    import io
+    import random
+
+    from PIL import Image, ImageDraw
+
+    rnd = random.Random(seed)  # noqa: S311 - a reproducible picture, not a secret
+    img = Image.new("RGB", (size, size), tuple(rnd.randint(30, 220) for _ in range(3)))
+    draw = ImageDraw.Draw(img)
+    for _ in range(10):
+        x, y = rnd.randint(-10, size), rnd.randint(-10, size)
+        r = rnd.randint(size // 8, size // 2)
+        shape = draw.ellipse if rnd.random() < 0.5 else draw.rectangle
+        shape((x, y, x + r, y + r), fill=tuple(rnd.randint(0, 255) for _ in range(3)))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
     return buf.getvalue()
 
 
@@ -141,10 +185,14 @@ def register_device(client, user_id: str) -> tuple[str, ec.EllipticCurvePrivateK
 
 
 def signed_claim(device_id: str, key, data: bytes, draft_id: str = "draft-1", nonce: str | None = None, **over) -> dict:
-    """The claim a phone sends for a capture it signed with its key."""
+    """The claim a phone sends for a capture it signed with its key. Without `nonce`, the phone uses a fresh
+    challenge of the device's owner, as the app does."""
+    if nonce is None:
+        owner = next(user for (_, user), (known, _) in _devices.items() if known == device_id)
+        nonce = issue_nonce(owner)[0]
     sha = hashlib.sha256(data).hexdigest()
     at_ms = over.pop("captured_at_ms", int(time.time() * 1000))
-    signature = key.sign(f"{sha}|{at_ms}|{draft_id}|{nonce or ''}".encode(), ec.ECDSA(hashes.SHA256()))
+    signature = key.sign(f"{sha}|{at_ms}|{draft_id}|{nonce}".encode(), ec.ECDSA(hashes.SHA256()))
     return {
         "source": "in_app",
         "device_id": device_id,
@@ -160,7 +208,7 @@ def signed_claim(device_id: str, key, data: bytes, draft_id: str = "draft-1", no
 def publish(client, user_id: str, seed: int, proofs: int = 2, signed: bool = True, **form) -> dict:
     """Publish a work with `proofs` proof files: signed in-app captures by default, or imported ones."""
     files = [("file", (f"w{seed}.png", png(seed), "image/png"))]
-    proof_bytes = [png(1000 + seed * 10 + i) for i in range(proofs)]
+    proof_bytes = [sketch(1000 + seed * 10 + i) for i in range(proofs)]
     files += [("proof", (f"p{seed}-{i}.png", data, "image/png")) for i, data in enumerate(proof_bytes)]
     data = {"title": f"Work {seed}", "category": "painting", **form}
     if proofs:

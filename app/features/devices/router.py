@@ -11,6 +11,7 @@ from app.platform.rate_limit import SlidingWindowLimiter, limit_per_minute
 
 limiter = SlidingWindowLimiter()
 limited = limit_per_minute(
+    "devices",
     limiter,
     lambda: get_settings().device_rate_limit_per_minute,
     lambda: get_settings().device_global_rate_limit_per_minute,

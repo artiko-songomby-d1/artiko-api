@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.features.artists.models import Artist
@@ -39,6 +39,8 @@ def to_out(
         exposition_id=work.exposition_id,
         series_id=work.series_id,
         media_url=storage.media_url(work.media_path),
+        media_hd_url=storage.media_url(work.media_hd_path) if work.media_hd_path else None,
+        poster_url=storage.media_url(work.poster_path) if work.poster_path else None,
         media_kind=work.media_kind,
         proof_urls=visible_proof_urls(work, owner_user_id, viewer),
         sha256=work.sha256,
@@ -63,6 +65,7 @@ async def search_works(
     month: str | None,
     artist_id: uuid.UUID | None,
     exposition_id: uuid.UUID | None,
+    text: str | None,
     page: Page,
     viewer: CurrentUser | None = None,
 ) -> list[WorkOut]:
@@ -76,5 +79,13 @@ async def search_works(
         q = q.where(Work.artist_id == artist_id)
     if exposition_id:
         q = q.where(Work.exposition_id == exposition_id)
+    if text and (needle := text.strip()):
+        q = q.where(
+            or_(
+                Work.title.icontains(needle, autoescape=True),
+                Work.story.icontains(needle, autoescape=True),
+                Artist.display_name.icontains(needle, autoescape=True),
+            )
+        )
     q = q.limit(page.limit).offset(page.offset)
     return [to_out(*row, viewer=viewer) for row in await db.execute(q)]

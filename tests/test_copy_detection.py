@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 
+from app.features.review.models import ReviewCase
 from app.features.scan.models import KnownWork
 from app.platform.config import get_settings
 from tests.conftest import auth, become_artist
@@ -79,6 +80,55 @@ def test_a_near_copy_of_the_artists_own_work_is_accepted_and_linked_as_a_series(
     assert second.json()["series_id"] == first["id"]
     assert client.get(f"/api/v1/works/{first['id']}").json()["series_id"] == first["id"]
     assert count("SELECT count(*) FROM app.review_case") == 0
+
+
+@pytest.mark.parametrize(
+    ("stored_hash", "max_distance", "status"),
+    [
+        ("0003000300030003", 8, 409),
+        ("0003000300030003", 7, 201),
+        ("000300030003000F", 8, 201),
+        ("0007000700070007", 11, 201),
+        ("0007000700070007", 12, 409),
+        ("F", 4, 409),
+    ],
+)
+def test_phash_filter_uses_the_exact_distance(client, monkeypatch, stored_hash: str, max_distance: int, status: int):
+    from app.features.works import service
+
+    monkeypatch.setattr(get_settings(), "publish_phash_max_distance", max_distance)
+    become_artist(client, "alice")
+    become_artist(client, "bob", "Bob")
+    monkeypatch.setattr(service, "phash", lambda data: stored_hash)
+    assert post_work(client, "alice", encode(art(1))).status_code == 201
+
+    monkeypatch.setattr(service, "phash", lambda data: "0000000000000000")
+    response = post_work(client, "bob", encode(art(2)))
+    assert response.status_code == status, response.text
+
+
+def test_phash_records_the_closest_foreign_match_even_with_a_closer_own_work(client, monkeypatch):
+    from app.features.works import service
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "publish_phash_max_distance", 0)
+    fingerprints = iter(("7", "3", "1", "0"))
+    monkeypatch.setattr(service, "phash", lambda data: next(fingerprints).zfill(16))
+    become_artist(client, "alice")
+    become_artist(client, "bob", "Bob")
+    assert post_work(client, "bob", encode(art(1))).status_code == 201
+    closest_foreign = post_work(client, "bob", encode(art(2)))
+    assert closest_foreign.status_code == 201
+    assert post_work(client, "alice", encode(art(3))).status_code == 201
+
+    monkeypatch.setattr(settings, "publish_phash_max_distance", 8)
+    assert post_work(client, "alice", encode(art(4))).status_code == 409
+    engine = create_engine(settings.async_database_url)
+    with engine.connect() as conn:
+        match_id, signal = conn.execute(select(ReviewCase.other_work_id, ReviewCase.signal)).one()
+    engine.dispose()
+    assert str(match_id) == closest_foreign.json()["id"]
+    assert signal == "phash"
 
 
 def test_a_clip_match_with_another_artist_is_refused(client, monkeypatch):

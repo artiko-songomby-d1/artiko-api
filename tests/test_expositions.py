@@ -37,6 +37,14 @@ def test_list_newest_first_and_filtered_by_artist(client):
     assert [e["title"] for e in client.get("/api/v1/expositions").json()] == ["Second", "Bob's", "First"]
     assert [e["title"] for e in client.get(f"/api/v1/expositions?artist_id={alice}").json()] == ["Second", "First"]
 
+    filtered = {"artist_id": alice, "limit": 1}
+    first_page = client.get("/api/v1/expositions", params=filtered)
+    second_page = client.get("/api/v1/expositions", params={**filtered, "offset": 1})
+    assert first_page.status_code == second_page.status_code == 200
+    assert [e["title"] for e in first_page.json()] == ["Second"]
+    assert [e["title"] for e in second_page.json()] == ["First"]
+    assert client.get("/api/v1/expositions", params={**filtered, "offset": 2}).json() == []
+
 
 def test_unknown_exposition_is_404(client):
     r = client.get("/api/v1/expositions/00000000-0000-0000-0000-000000000000")

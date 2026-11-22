@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.platform.db import Base
@@ -20,3 +20,15 @@ class Device(Base):
     # "software", "tee" or "strongbox" from the attestation; "unverified" when the provider is "none".
     attestation_level: Mapped[str] = mapped_column(String(12))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UsedCapture(Base):
+    """A signed capture that proves a published work. The primary key is what makes a capture single-use: the
+    file's SHA-256 alone, so a second signature, another draft or another account on the same phone change nothing."""
+
+    __tablename__ = "used_capture"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Kept to trace a capture back to the phone that signed it; not part of what makes it unique.
+    device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("device.id", ondelete="SET NULL"), nullable=True)
+    used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

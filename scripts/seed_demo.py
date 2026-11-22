@@ -17,7 +17,10 @@ from sqlalchemy import delete, select
 from app.features.artists.models import Artist
 from app.features.practices.models import Practice
 from app.features.works.models import Exposition, Vote, Work, WorkProof
-from app.platform import storage
+from app.platform import (
+    registry,  # noqa: F401  registers tables referenced by foreign keys
+    storage,
+)
 from app.platform.db import get_sessionmaker
 from app.platform.embed import embed
 from app.platform.months import current_month
@@ -67,7 +70,6 @@ async def main() -> None:
                                     learners=learners, median_age=age, description=description))
         await db.execute(delete(Artist).where(Artist.user_id.like("demo-%")))
         await db.execute(delete(Vote).where(Vote.user_id.like("demo-voter-%")))
-        await db.commit()
 
         month = current_month()
         works = []
