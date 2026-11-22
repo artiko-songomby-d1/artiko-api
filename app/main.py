@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,6 +21,7 @@ from app.features.works.router import router as works
 from app.platform.config import get_settings
 from app.platform.errors import install_error_handlers
 from app.platform.http_security import install_security_headers
+from app.platform.rate_limit import RedisSlidingWindowLimiter
 
 API_PREFIX = "/api/v1"
 ROUTERS = (health, me, devices, artists, expositions, museum, works, votes, practices, scan)
@@ -25,7 +29,21 @@ ROUTERS = (health, me, devices, artists, expositions, museum, works, votes, prac
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Artiko API", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if not settings.rate_limit_redis_url:
+            yield
+            return
+        limiter = RedisSlidingWindowLimiter(settings.rate_limit_redis_url)
+        app.state.rate_limiter = limiter
+        try:
+            yield
+        finally:
+            app.state.rate_limiter = None
+            await limiter.aclose()
+
+    app = FastAPI(title="Artiko API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,

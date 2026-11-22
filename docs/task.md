@@ -84,10 +84,11 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
   tokens : inutile, à retirer.
 - [ ] **22. Détail de l'erreur JWT renvoyé au client** (`auth.py:88`, `f"Invalid token: {e}"`) : à garder
   dans les logs.
-- [ ] **23. Rate limit en mémoire par processus** (`rate_limit.py:3`, assumé) : partager les compteurs
-  (Redis) si plusieurs instances.
+- [x] **23. Rate limit en mémoire par processus** : les instances partagent les compteurs lorsque
+  `RATE_LIMIT_REDIS_URL` est configurée. Sans cette variable, les compteurs restent locaux au processus.
 - [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `redis`, `sse-starlette`,
-  `pyacoustid` et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`.
+  `pyacoustid` et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`. Le point 23 réintroduit
+  `redis` pour les compteurs partagés.
 
 ## Ordre suggéré
 

@@ -103,6 +103,7 @@ async def list_proofs(work_id: uuid.UUID, db: Db, user: User) -> list[ProofOut]:
     "/proofs/{proof_id}/file",
     dependencies=[
         limit_per_minute(
+            "proof-files",
             proof_limiter,
             lambda: get_settings().proof_rate_limit_per_minute,
             lambda: get_settings().proof_global_rate_limit_per_minute,

@@ -255,6 +255,7 @@ paths:
               schema: { $ref: "#/components/schemas/Challenge" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/devices:
     post:
@@ -280,6 +281,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/works/{work_id}/proofs:
     parameters:
@@ -317,6 +319,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
   /api/v1/expositions:
     get:
@@ -498,6 +501,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/RateLimitUnavailable" }
 
 components:
   securitySchemes:
@@ -548,6 +552,9 @@ components:
         Retry-After:
           description: Seconds to wait before the next request
           schema: { type: integer }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    RateLimitUnavailable:
+      description: The configured shared rate limiter is unreachable (`rate_limit_unavailable`)
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Invalid:
       description: Body or parameters fail validation (`invalid_request`)

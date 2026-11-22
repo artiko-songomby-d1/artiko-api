@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # Header the hosting proxy overwrites with the client IP (e.g. x-real-ip). Empty = the socket peer.
     # Never name a header a client can send itself, or the rate limit can be dodged.
     client_ip_header: str = ""
+    # All API instances share rate limits when they use the same Redis URL.
+    rate_limit_redis_url: str = ""
 
     models_dir: str = "models"
     # Cosine similarity above which a scanned photo is the same work (CLIP ViT-B/32).
