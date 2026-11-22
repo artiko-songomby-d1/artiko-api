@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import threading
 import time
 
 import httpx
@@ -103,6 +104,58 @@ def test_image_that_cannot_be_shrunk_is_accepted_unchecked(image, monkeypatch, c
         asyncio.run(detector(fake).check_main_file(image, "image", ".png", ai_declared=False))
     assert fake.requests == []
     assert caplog.messages == ["AI detection skipped (image file): over 200 bytes after shrinking"]
+
+
+def bilevel_png(width: int, height: int) -> bytes:
+    """A large but cheap PNG: one bit a pixel, all zero."""
+    buffer = io.BytesIO()
+    Image.new("1", (width, height)).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("size", [(8000, 5001), (13500, 13500)])
+def test_an_image_over_40_m_pixels_is_accepted_without_a_copy(size, monkeypatch, caplog):
+    monkeypatch.setattr(ai_detection, "MAX_IMAGE_BYTES", 100)
+    monkeypatch.setattr(Image.Image, "convert", lambda *a, **k: pytest.fail("the image was decoded"))
+    fake = FakeSightengine(0.99)
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        asyncio.run(detector(fake).check_main_file(bilevel_png(*size), "image", ".png", ai_declared=False))
+    assert fake.requests == []
+    assert caplog.messages == ["AI detection skipped (image file): over 40000000 pixels"]
+
+
+def test_the_pixel_cap_is_inclusive(monkeypatch):
+    monkeypatch.setattr(ai_detection, "MAX_SHRINK_PIXELS", 64 * 64)
+    assert ai_detection.shrunk_copy(noise_png(64, 64)) is not None
+    monkeypatch.setattr(ai_detection, "MAX_SHRINK_PIXELS", 64 * 64 - 1)
+    with pytest.raises(ai_detection.TooManyPixels):
+        ai_detection.shrunk_copy(noise_png(64, 64))
+
+
+def test_one_shrunk_copy_is_built_at_a_time(monkeypatch):
+    monkeypatch.setattr(ai_detection, "MAX_IMAGE_BYTES", 100)
+    running, most = 0, 0
+    guard = threading.Lock()
+
+    def slow_copy(data: bytes) -> bytes:
+        nonlocal running, most
+        with guard:
+            running += 1
+            most = max(most, running)
+        time.sleep(0.05)
+        with guard:
+            running -= 1
+        return b"jpeg"
+
+    monkeypatch.setattr(ai_detection, "shrunk_copy", slow_copy)
+    checker = detector(FakeSightengine(0.1))
+
+    async def three_large_images_at_once():
+        image = noise_png(64, 64)
+        await asyncio.gather(*(checker.check_main_file(image, "image", ".png", False) for _ in range(3)))
+
+    asyncio.run(three_large_images_at_once())
+    assert most == 1
 
 
 def test_missing_ffmpeg_is_fail_open(caplog):

@@ -28,6 +28,9 @@ MAX_IMAGE_BYTES = 12 * 1024 * 1024
 SHRINK_FACTOR = 0.75
 MAX_SHRINK_STEPS = 6
 SHRINK_JPEG_QUALITY = 85
+# Pillow holds 4 bytes a pixel, for the decoded image, its RGB copy and each resize: 40 M pixels peaked at about
+# 510 MB above the process baseline (measured with Pillow 13, 2026-11-22).
+MAX_SHRINK_PIXELS = 40_000_000
 VIDEO_CHECK_SECONDS = 60
 IMAGE_CONTENT_TYPES = {ext: mime for mime, (kind, ext) in storage.TYPES.items() if kind == "image"}
 FILE_FIELD = {"field": "file"}
@@ -62,6 +65,7 @@ class AiDetector:
     ):
         self._sightengine, self._frames, self._threshold = sightengine, frames, threshold
         self._video_slots = PerLoop(lambda: asyncio.Semaphore(max_video_checks))
+        self._shrink_slot = PerLoop(asyncio.Lock)
 
     async def check_main_file(self, data: bytes, kind: str, ext: str, ai_declared: bool) -> None:
         """Raises BadRequest when the main file must be refused; returns in every other case, checked or not."""
@@ -80,7 +84,12 @@ class AiDetector:
     async def _image_score(self, sightengine: Sightengine, data: bytes, ext: str) -> float | None:
         if len(data) <= MAX_IMAGE_BYTES:
             return await sightengine.ai_generated_score(data, IMAGE_CONTENT_TYPES[ext], "image")
-        copy = await asyncio.to_thread(shrunk_copy, data)
+        try:
+            async with self._shrink_slot.get():
+                copy = await asyncio.to_thread(shrunk_copy, data)
+        except TooManyPixels:
+            log.warning("AI detection skipped (image file): over %d pixels", MAX_SHRINK_PIXELS)
+            return None
         if copy is None:
             log.warning("AI detection skipped (image file): over %d bytes after shrinking", MAX_IMAGE_BYTES)
             return None
@@ -113,12 +122,23 @@ class AiDetector:
                 scores.append(score)
 
 
+class TooManyPixels(Exception):
+    """The image is too large to decode for a shrunk copy."""
+
+
 def shrunk_copy(data: bytes) -> bytes | None:
-    """A JPEG copy within MAX_IMAGE_BYTES, its longest side cut by a quarter per step; None when there is none."""
+    """A JPEG copy within MAX_IMAGE_BYTES, its longest side cut by a quarter per step; None when there is none.
+
+    Raises TooManyPixels, before decoding anything, for an image over MAX_SHRINK_PIXELS.
+    """
     try:
-        with Image.open(io.BytesIO(data)) as image:
+        with Image.open(io.BytesIO(data)) as image:  # reads the header only
+            if image.width * image.height > MAX_SHRINK_PIXELS:
+                raise TooManyPixels
             rgb = image.convert("RGB")
-    except (OSError, ValueError, Image.DecompressionBombError):
+    except Image.DecompressionBombError as e:
+        raise TooManyPixels from e
+    except (OSError, ValueError):
         return None
     for step in range(1, MAX_SHRINK_STEPS + 1):
         scale = SHRINK_FACTOR**step
