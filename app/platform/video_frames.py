@@ -114,7 +114,7 @@ class VideoFrames:
             code, _ = await self._runner.run([*args, "-f", "image2", "-c:v", "mjpeg", str(output)])
         except ProcessTimedOut:
             return None
-        # ffmpeg exits 0 without writing anything when the position is past the last frame.
+        # Past the last frame, ffmpeg 5 exits 0 without writing anything and ffmpeg 7 exits with an error.
         if code != 0 or not output.is_file():
             return None
         return await asyncio.to_thread(output.read_bytes) or None
