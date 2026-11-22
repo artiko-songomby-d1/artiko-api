@@ -112,7 +112,8 @@ def deep_json(depth: int = 100_000) -> bytes:
 
 
 HOSTILE_ANSWERS = {
-    "deeply nested": (httpx.Response(200, content=deep_json()), "http_200_not_json"),
+    # json.loads raises RecursionError on Python 3.11 and parses the list on newer versions.
+    "deeply nested": (httpx.Response(200, content=deep_json()), ("http_200_not_json", "http_200_unexpected_body")),
     "integer too long to parse": (
         httpx.Response(200, content=b'{"status":"success","type":{"ai_generated":' + b"9" * 5000 + b"}}"),
         "http_200_not_json",
@@ -146,7 +147,8 @@ def test_a_hostile_answer_is_fail_open(name, caplog):
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
         score = asyncio.run(FakeSightengine(response).client().ai_generated_score(b"jpeg", "image/jpeg", "image"))
     assert score is None
-    assert caplog.messages == [f"AI detection skipped (image file): {code}"]
+    accepted = code if isinstance(code, tuple) else (code,)
+    assert caplog.messages in [[f"AI detection skipped (image file): {one}"] for one in accepted]
 
 
 def test_an_answer_over_1_mib_is_not_read_to_the_end(caplog):
