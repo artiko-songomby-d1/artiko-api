@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import time
 
 import httpx
 import numpy as np
@@ -60,6 +61,7 @@ CONFIGURED = {"ai_detection_provider": "sightengine", "sightengine_user": "u-123
         ("ai_detection_wait_seconds", -5),
         ("ai_detection_wait_seconds", "nan"),
         ("ai_detection_ffmpeg_memory_mb", 0),
+        ("ai_detection_max_video_checks", 0),
         ("sightengine_user", "   "),
         ("sightengine_secret", " \t "),
     ],
@@ -158,19 +160,57 @@ class BlockedFrames:
         return []
 
 
-def test_third_video_check_waits():
+@pytest.mark.parametrize("slots", [1, 2])
+def test_video_checks_past_the_slot_count_wait(slots):
     frames = BlockedFrames()
-    checker = detector(FakeSightengine(0.99), frames)
+    checker = AiDetector(FakeSightengine(0.99).client(), frames, threshold=0.8, max_video_checks=slots)
 
     async def three_checks():
         checks = [asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False)) for _ in range(3)]
         await asyncio.sleep(0.05)
-        assert frames.entered == 2
+        assert frames.entered == slots
         frames.release.set()
         await asyncio.gather(*checks)
         assert frames.entered == 3
 
     asyncio.run(three_checks())
+
+
+def test_the_wait_for_a_video_slot_counts_in_the_deadline(monkeypatch, caplog):
+    frames = BlockedFrames()
+    checker = detector(FakeSightengine(0.99), frames)
+
+    async def second_check_waits_behind_a_stuck_one():
+        stuck = asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False))
+        await asyncio.sleep(0.01)
+        monkeypatch.setattr(ai_detection, "VIDEO_CHECK_SECONDS", 0.2)
+        started = time.monotonic()
+        await checker.check_main_file(VIDEO, "video", ".mp4", False)
+        waited = time.monotonic() - started
+        frames.release.set()
+        await stuck
+        return waited
+
+    with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
+        waited = asyncio.run(second_check_waits_behind_a_stuck_one())
+    assert waited < 0.4 and frames.entered == 1
+    assert caplog.messages == ["AI detection stopped (video file): over 0 s"]
+
+
+def test_one_detector_serves_one_event_loop_after_another():
+    frames = BlockedFrames()
+    checker = detector(FakeSightengine(0.99), frames)
+
+    async def three_checks_contending_for_the_slots():
+        checks = [asyncio.create_task(checker.check_main_file(VIDEO, "video", ".mp4", False)) for _ in range(3)]
+        await asyncio.sleep(0.01)
+        frames.release.set()
+        await asyncio.gather(*checks)
+        frames.release = asyncio.Event()
+
+    asyncio.run(three_checks_contending_for_the_slots())
+    asyncio.run(three_checks_contending_for_the_slots())
+    assert frames.entered == 6
 
 
 def test_video_check_stops_at_its_deadline(monkeypatch, caplog):

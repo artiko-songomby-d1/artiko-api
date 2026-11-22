@@ -8,8 +8,9 @@ because of the file itself, refuses it.
 import asyncio
 import io
 import logging
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Generic, TypeVar
 
 from fastapi import Depends
 from PIL import Image
@@ -28,7 +29,6 @@ SHRINK_FACTOR = 0.75
 MAX_SHRINK_STEPS = 6
 SHRINK_JPEG_QUALITY = 85
 VIDEO_CHECK_SECONDS = 60
-MAX_VIDEO_CHECKS = 2
 IMAGE_CONTENT_TYPES = {ext: mime for mime, (kind, ext) in storage.TYPES.items() if kind == "image"}
 FILE_FIELD = {"field": "file"}
 AI_REFUSAL = (
@@ -37,10 +37,31 @@ AI_REFUSAL = (
 )
 
 
+T = TypeVar("T")
+
+
+class PerLoop(Generic[T]):
+    """One value per running event loop: an asyncio primitive binds to the first loop that waits on it, and the
+    detector outlives a loop (it is cached for the process, and each TestClient runs its own loop)."""
+
+    def __init__(self, factory: Callable[[], T]):
+        self._factory = factory
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._value: T | None = None
+
+    def get(self) -> T:
+        loop = asyncio.get_running_loop()
+        if self._value is None or self._loop is not loop:
+            self._loop, self._value = loop, self._factory()
+        return self._value
+
+
 class AiDetector:
-    def __init__(self, sightengine: Sightengine | None, frames: VideoFrames, threshold: float):
+    def __init__(
+        self, sightengine: Sightengine | None, frames: VideoFrames, threshold: float, max_video_checks: int = 1
+    ):
         self._sightengine, self._frames, self._threshold = sightengine, frames, threshold
-        self._video_slots = asyncio.Semaphore(MAX_VIDEO_CHECKS)
+        self._video_slots = PerLoop(lambda: asyncio.Semaphore(max_video_checks))
 
     async def check_main_file(self, data: bytes, kind: str, ext: str, ai_declared: bool) -> None:
         """Raises BadRequest when the main file must be refused; returns in every other case, checked or not."""
@@ -66,23 +87,22 @@ class AiDetector:
         return await sightengine.ai_generated_score(copy, "image/jpeg", "image")
 
     async def _video_score(self, sightengine: Sightengine, data: bytes, ext: str) -> float | None:
-        """The highest score of the frames that could be checked before the deadline."""
+        """The highest score of the frames checked before the deadline, which includes the wait for a video slot."""
         if ext != ".mp4":
             raise BadRequest("unsupported_video_format", "Only MP4 videos are accepted", details=FILE_FIELD)
         scores: list[float] = []
-        async with self._video_slots:
-            try:
-                async with asyncio.timeout(VIDEO_CHECK_SECONDS):
-                    await self._score_frames(sightengine, data, scores)
-            except UnreadableVideo as e:
-                message = "This video cannot be read: send a valid MP4"
-                raise BadRequest("unreadable_video", message, details=FILE_FIELD) from e
-            except ToolUnavailable:
-                log.error("AI detection skipped (video file): ffmpeg or ffprobe cannot be started")
-            except ProcessTimedOut:
-                log.warning("AI detection skipped (video file): ffmpeg or ffprobe timed out")
-            except TimeoutError:
-                log.warning("AI detection stopped (video file): over %d s", VIDEO_CHECK_SECONDS)
+        try:
+            async with asyncio.timeout(VIDEO_CHECK_SECONDS), self._video_slots.get():
+                await self._score_frames(sightengine, data, scores)
+        except UnreadableVideo as e:
+            message = "This video cannot be read: send a valid MP4"
+            raise BadRequest("unreadable_video", message, details=FILE_FIELD) from e
+        except ToolUnavailable:
+            log.error("AI detection skipped (video file): ffmpeg or ffprobe cannot be started")
+        except ProcessTimedOut:
+            log.warning("AI detection skipped (video file): ffmpeg or ffprobe timed out")
+        except TimeoutError:
+            log.warning("AI detection stopped (video file): over %d s", VIDEO_CHECK_SECONDS)
         return max(scores, default=None)
 
     async def _score_frames(self, sightengine: Sightengine, data: bytes, scores: list[float]) -> None:
@@ -121,7 +141,7 @@ def get_ai_detector() -> AiDetector:
         spacer = RequestSpacer(REQUEST_SPACING_SECONDS)
         sightengine = Sightengine(credentials, spacer, settings.ai_detection_wait_seconds)
     frames = VideoFrames(ProcessRunner(settings.ai_detection_ffmpeg_memory_mb))
-    return AiDetector(sightengine, frames, settings.ai_detection_threshold)
+    return AiDetector(sightengine, frames, settings.ai_detection_threshold, settings.ai_detection_max_video_checks)
 
 
 AiCheck = Annotated[AiDetector, Depends(get_ai_detector)]

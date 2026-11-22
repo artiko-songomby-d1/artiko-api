@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     ai_detection_threshold: float = Field(0.8, gt=0, le=1, allow_inf_nan=False)
     # Longest wait for a turn at Sightengine (1 request per second on the free plan) before the file is accepted.
     ai_detection_wait_seconds: float = Field(30, ge=0, allow_inf_nan=False)
+    # Video checks running at once: each runs ffmpeg, the largest memory user of a check; the others wait.
+    ai_detection_max_video_checks: int = Field(1, ge=1)
     # prlimit --data cap of each ffprobe and ffmpeg process, in MiB.
     ai_detection_ffmpeg_memory_mb: int = Field(1024, ge=1)
 
