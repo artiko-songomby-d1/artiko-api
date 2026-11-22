@@ -80,8 +80,8 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
   verrou global ; un TTL suffirait.
 - [ ] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` renvoient tout, avec
   les preuves.
-- [ ] **21. CORS `allow_credentials=True`** (`main.py:32`) alors que l'API n'utilise que des bearer
-  tokens : inutile, à retirer.
+- [x] **21. CORS `allow_credentials=True`** : option retirée. Les origines configurées peuvent
+  toujours envoyer l'en-tête `Authorization` pour l'authentification bearer.
 - [x] **22. Détail de l'erreur JWT renvoyé au client** : réponse 401 générique. Le type d'erreur est
   journalisé au niveau debug sans le jeton, les claims ou le détail fourni par le client.
 - [x] **23. Rate limit en mémoire par processus** : les instances partagent les compteurs lorsque
