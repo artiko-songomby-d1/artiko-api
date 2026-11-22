@@ -1,6 +1,7 @@
 """AI-generated detection seen from POST /works, with Sightengine behind httpx.MockTransport."""
 
 import io
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -223,6 +224,11 @@ def test_check_runs_after_cheap_checks_and_before_storage(client, sightengine, m
     become_artist(client, "alice")
     assert publish(client, "alice", 1, exposition_id=str(uuid.uuid4())).status_code == 400
     assert publish(client, "alice", 1, proofs=6, signed=False).status_code == 400
+    files = [("file", ("w.png", png(1), "image/png"))]
+    files += [("proof", (f"p{i}.png", png(50 + i), "image/png")) for i in range(2)]
+    one_claim = {"title": "W", "category": "painting", "proof_claims": json.dumps([{"source": "imported"}])}
+    r = client.post("/api/v1/works", data=one_claim, files=files, headers=auth("alice"))
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_proof_claims"
     assert publish(client, "alice", 1, ai_declared="true").status_code == 201
     events.clear()
     assert publish(client, "alice", 1).status_code == 409

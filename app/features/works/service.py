@@ -52,6 +52,8 @@ async def publish_work(
         raise BadRequest("invalid_exposition", "Choose one of your own expositions")
     if len(proof) > MAX_PROOFS:
         raise BadRequest("too_many_proofs", f"At most {MAX_PROOFS} proof files")
+    if proof_claims and len(proof_claims) != len(proof):
+        raise BadRequest("invalid_proof_claims", "Send one claim for each proof file, in the same order")
 
     data = await storage.read_upload(file)
     kind, ext = storage.kind_of(file, data)
@@ -63,8 +65,6 @@ async def publish_work(
     embedding = (await run_in_threadpool(embed, data)).tolist() if kind == "image" else None
     image_hash = await run_in_threadpool(phash, data) if kind == "image" else None
     earlier = await run_publish_checks(db, Candidate(artist.id, fingerprint, kind, embedding, image_hash))
-    if proof_claims and len(proof_claims) != len(proof):
-        raise BadRequest("invalid_proof_claims", "Send one claim for each proof file, in the same order")
     checked = []
     for i, p in enumerate(proof):
         p_data = await storage.read_upload(p)
