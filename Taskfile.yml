@@ -11,6 +11,27 @@ tasks:
       - task: lint
       - task: test
 
+  up:
+    desc: Build and start the Docker stack, then wait for the API to be ready
+    cmds:
+      - docker compose up --build --wait --wait-timeout 300
+
+  down:
+    desc: Stop the Docker stack
+    cmds:
+      - docker compose down
+
+  seed:
+    desc: Refresh demo data and index known works in the running Docker stack
+    cmds:
+      - docker compose exec -T api python -u -m scripts.seed_demo
+      - docker compose exec -T api python -u -m scripts.index_known --met 200
+
+  run:
+    desc: Start the development API with auto-reload
+    cmds:
+      - uv run uvicorn app.main:app --reload
+
   lint:
     desc: Run Ruff
     cmds:

@@ -4,21 +4,17 @@ FastAPI backend for the Artiko Android and web apps. The contract is [`openapi.y
 
 ## Setup
 
-1. Create two Neon databases (dev and test) and copy `.env.example` to `.env` with their URLs in `DATABASE_URL` and `TEST_DATABASE_URL`.
-2. Install, migrate, get the CLIP model, seed:
+Install Go Task and Docker with Compose v2.24 or newer, then run `task up`. Docker builds the API image with the locked dependencies and CLIP model, starts a local PostgreSQL database, applies migrations, and waits for the API and its database connection to be ready at `http://127.0.0.1:8000/api/v1/ready`.
 
-```
-uv sync
-uv run alembic upgrade head
-uv run python -m scripts.download_model
-uv run python -m scripts.seed_demo
-uv run python -m scripts.index_known --met 200
-uv run uvicorn app.main:app --reload
-```
+If port 8000 is in use, run `ARTIKO_PORT=8001 task up` to serve the API on port 8001.
+
+The stack works without a `.env` file. To use Neon, set `DATABASE_URL` to your development database in `.env`. Run `task seed` after startup to recreate the demo artists and index known works in the configured database. `task down` stops the stack and keeps the local database and uploads in Docker volumes.
+
+For auto-reload outside Docker, install `uv`, configure `DATABASE_URL` for a database reachable from your host, then run `uv sync`, `uv run alembic upgrade head`, `uv run python -m scripts.download_model`, and `task run`.
 
 ## Tests
 
-With Go Task and `uv` installed, run lint and the full test suite with `task` (or `task check`).
+With `uv` installed, run lint and the full test suite with `task` (or `task check`).
 
 ```sh
 task lint                          # Ruff only
