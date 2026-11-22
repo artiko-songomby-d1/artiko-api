@@ -64,6 +64,63 @@ def test_list_filters(client):
     assert client.get("/api/v1/works?month=2026-13").status_code == 422
 
 
+def search(client, **params) -> list[str]:
+    r = client.get("/api/v1/works", params=params)
+    assert r.status_code == 200, r.text
+    return [w["title"] for w in r.json()]
+
+
+def test_search_matches_title_story_or_artist_name_ignoring_case(client):
+    become_artist(client, "alice", "Hery Studio")
+    publish(client, "alice", 1, title="Highland light", story="Painted at dawn")
+    publish(client, "alice", 2, title="Rice terraces", story="Mist over the valley")
+
+    assert search(client, q="highLAND") == ["Highland light"]
+    assert search(client, q="MIST") == ["Rice terraces"]
+    assert search(client, q="hery") == ["Rice terraces", "Highland light"]
+    assert search(client, q="  dawn ") == ["Highland light"]
+    assert search(client, q="nothing like this") == []
+
+
+def test_search_matches_like_wildcards_literally(client):
+    become_artist(client, "alice")
+    for seed, title in enumerate(("100% cotton", "a_b", "x/y", "plain"), start=1):
+        publish(client, "alice", seed, title=title)
+
+    assert search(client, q="%") == ["100% cotton"]
+    assert search(client, q="_") == ["a_b"]
+    assert search(client, q="/") == ["x/y"]
+    assert search(client, q="a%b") == []
+
+
+def test_search_combines_with_filters_and_pages(client):
+    become_artist(client, "alice")
+    for seed in range(1, 4):
+        publish(client, "alice", seed, title=f"Dawn {seed}")
+    publish(client, "alice", 4, title="Dawn crafts", category="crafts")
+    publish(client, "alice", 5, title="Dusk")
+
+    first = search(client, q="dawn", category="painting", limit=2)
+    second = search(client, q="dawn", category="painting", limit=2, offset=2)
+    assert first + second == ["Dawn 3", "Dawn 2", "Dawn 1"]
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_search_filters_nothing(client, blank):
+    become_artist(client, "alice")
+    publish(client, "alice", 1)
+    publish(client, "alice", 2)
+    assert search(client, q=blank) == search(client)
+    assert len(search(client)) == 2
+
+
+def test_search_text_is_validated(client):
+    assert client.get("/api/v1/works", params={"q": "a" * 100}).status_code == 200
+    for refused in ("a" * 101, "a\x00b"):
+        r = client.get("/api/v1/works", params={"q": refused})
+        assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
+
+
 def test_categories(client):
     ids = [c["id"] for c in client.get("/api/v1/categories").json()]
     assert "oral_arts" in ids and len(ids) == 8
