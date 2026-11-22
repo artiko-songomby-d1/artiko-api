@@ -7,8 +7,6 @@ import tempfile
 from pathlib import Path
 
 PROCESS_TIMEOUT_SECONDS = 30
-# Caps the total memory of each process; -max_alloc below caps each single allocation.
-MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
 FRAME_SHARES = (0.3, 0.5, 0.7)
 FIRST_FRAME = "0.000"
 MAX_FRAME_WIDTH = 1280
@@ -33,14 +31,17 @@ class UnreadableVideo(Exception):
 
 
 class ProcessRunner:
-    """Runs a command without a shell, under prlimit, with only PATH in its environment, killed at its time limit."""
+    """Runs a command without a shell, under prlimit, with only PATH in its environment, killed at its time limit.
 
-    def __init__(self, timeout_seconds: float = PROCESS_TIMEOUT_SECONDS):
-        self._timeout = timeout_seconds
+    `memory_limit_mb` caps the total memory of each process; -max_alloc below caps each single allocation.
+    """
+
+    def __init__(self, memory_limit_mb: int, timeout_seconds: float = PROCESS_TIMEOUT_SECONDS):
+        self._memory_limit_bytes, self._timeout = memory_limit_mb * 1024 * 1024, timeout_seconds
 
     async def run(self, args: list[str]) -> tuple[int, bytes]:
         """The exit code and standard output of the command."""
-        command = ["prlimit", f"--data={MEMORY_LIMIT_BYTES}", *args]
+        command = ["prlimit", f"--data={self._memory_limit_bytes}", *args]
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,

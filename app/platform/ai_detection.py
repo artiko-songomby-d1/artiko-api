@@ -120,7 +120,8 @@ def get_ai_detector() -> AiDetector:
         credentials = Credentials(settings.sightengine_user, settings.sightengine_secret.get_secret_value())
         spacer = RequestSpacer(REQUEST_SPACING_SECONDS)
         sightengine = Sightengine(credentials, spacer, settings.ai_detection_wait_seconds)
-    return AiDetector(sightengine, VideoFrames(ProcessRunner()), settings.ai_detection_threshold)
+    frames = VideoFrames(ProcessRunner(settings.ai_detection_ffmpeg_memory_mb))
+    return AiDetector(sightengine, frames, settings.ai_detection_threshold)
 
 
 AiCheck = Annotated[AiDetector, Depends(get_ai_detector)]

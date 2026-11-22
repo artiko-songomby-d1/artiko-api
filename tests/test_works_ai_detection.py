@@ -17,10 +17,10 @@ from app.platform import storage
 from app.platform.ai_detection import AI_REFUSAL, MAX_IMAGE_BYTES, AiDetector, get_ai_detector
 from app.platform.config import get_settings
 from app.platform.sightengine import CHECK_URL
-from app.platform.video_frames import ProcessRunner, VideoFrames
+from app.platform.video_frames import VideoFrames
 from tests.conftest import auth, become_artist, png, publish
 from tests.sightengine_fakes import TEST_SECRET, TEST_USER, FakeSightengine, failure, form_fields
-from tests.videos import audio_only_mp4, mp4
+from tests.videos import audio_only_mp4, ffmpeg_runner, mp4
 
 GLB = "model/gltf-binary"
 
@@ -29,7 +29,7 @@ GLB = "model/gltf-binary"
 def sightengine():
     fake = FakeSightengine(0.1)
     app.dependency_overrides[get_ai_detector] = lambda: AiDetector(
-        fake.client(), VideoFrames(ProcessRunner()), threshold=0.8
+        fake.client(), VideoFrames(ffmpeg_runner()), threshold=0.8
     )
     yield fake
     app.dependency_overrides.pop(get_ai_detector, None)

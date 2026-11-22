@@ -15,8 +15,8 @@ from tests.videos import mp4
 class SpyRunner(ProcessRunner):
     """The real runner, recording each command and the mode of the directory that holds its input."""
 
-    def __init__(self, timeout_seconds: float = 30):
-        super().__init__(timeout_seconds)
+    def __init__(self):
+        super().__init__(memory_limit_mb=1024)
         self.commands: list[list[str]] = []
         self.input_dirs: list[tuple[Path, int]] = []
 
@@ -50,10 +50,10 @@ def test_ffmpeg_arguments_environment_and_cleanup():
         asyncio.run(VideoFrames(garbage).extract(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64))
     assert not garbage.input_dirs[0][0].parent.exists()
 
-    code, environment = asyncio.run(ProcessRunner().run(["env"]))
+    code, environment = asyncio.run(ProcessRunner(1024).run(["env"]))
     assert code == 0 and environment.decode().splitlines() == [f"PATH={os.environ['PATH']}"]
-    code, data_limit_kb = asyncio.run(ProcessRunner().run(["sh", "-c", "ulimit -d"]))
-    assert data_limit_kb.decode().strip() == str(1024 * 1024)
+    code, data_limit_kb = asyncio.run(ProcessRunner(memory_limit_mb=300).run(["sh", "-c", "ulimit -d"]))
+    assert data_limit_kb.decode().strip() == str(300 * 1024)
 
 
 def test_ffmpeg_timeout_kills_the_process(tmp_path):
@@ -64,7 +64,7 @@ def test_ffmpeg_timeout_kills_the_process(tmp_path):
 
     started = time.monotonic()
     with pytest.raises(ProcessTimedOut):
-        asyncio.run(ProcessRunner(timeout_seconds=0.5).run([str(slow)]))
+        asyncio.run(ProcessRunner(1024, timeout_seconds=0.5).run([str(slow)]))
     assert time.monotonic() - started < 5
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid_file.read_text()), 0)

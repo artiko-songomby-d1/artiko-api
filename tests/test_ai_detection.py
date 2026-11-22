@@ -12,9 +12,9 @@ from app.platform import ai_detection
 from app.platform.ai_detection import AiDetector
 from app.platform.config import Settings
 from app.platform.errors import BadRequest
-from app.platform.video_frames import ProcessRunner, VideoFrames
+from app.platform.video_frames import VideoFrames
 from tests.sightengine_fakes import FakeSightengine, failure
-from tests.videos import mp4
+from tests.videos import ffmpeg_runner, mp4
 
 DATABASE_URL = "postgresql://artiko:artiko@127.0.0.1:5432/artiko_test"
 VIDEO = mp4(seconds=2, size="320x240")
@@ -59,6 +59,7 @@ CONFIGURED = {"ai_detection_provider": "sightengine", "sightengine_user": "u-123
         ("ai_detection_threshold", 1.5),
         ("ai_detection_wait_seconds", -5),
         ("ai_detection_wait_seconds", "nan"),
+        ("ai_detection_ffmpeg_memory_mb", 0),
         ("sightengine_user", "   "),
         ("sightengine_secret", " \t "),
     ],
@@ -82,7 +83,7 @@ def test_credentials_are_trimmed_and_edge_values_are_accepted():
 
 
 def detector(fake: FakeSightengine, frames: VideoFrames | None = None) -> AiDetector:
-    return AiDetector(fake.client(), frames or VideoFrames(ProcessRunner()), threshold=0.8)
+    return AiDetector(fake.client(), frames or VideoFrames(ffmpeg_runner()), threshold=0.8)
 
 
 def noise_png(width: int, height: int, seed: int = 0) -> bytes:
@@ -105,8 +106,8 @@ def test_image_that_cannot_be_shrunk_is_accepted_unchecked(image, monkeypatch, c
 def test_missing_ffmpeg_is_fail_open(caplog):
     fake = FakeSightengine(0.99)
     for frames in (
-        VideoFrames(ProcessRunner(), ffprobe="artiko-missing-ffprobe"),
-        VideoFrames(ProcessRunner(), ffmpeg="artiko-missing-ffmpeg"),
+        VideoFrames(ffmpeg_runner(), ffprobe="artiko-missing-ffprobe"),
+        VideoFrames(ffmpeg_runner(), ffmpeg="artiko-missing-ffmpeg"),
     ):
         caplog.clear()
         with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
@@ -128,7 +129,7 @@ def tool(tmp_path, name: str, body: str) -> str:
 @pytest.mark.parametrize("hanging", ["ffprobe", "ffmpeg"])
 def test_a_tool_killed_at_its_timeout_accepts_the_video(hanging, tmp_path, caplog):
     fake = FakeSightengine(0.99)
-    frames = VideoFrames(ProcessRunner(timeout_seconds=0.3), **{hanging: tool(tmp_path, hanging, "exec sleep 30")})
+    frames = VideoFrames(ffmpeg_runner(timeout_seconds=0.3), **{hanging: tool(tmp_path, hanging, "exec sleep 30")})
     with caplog.at_level(logging.WARNING, logger="artiko.ai_detection"):
         asyncio.run(detector(fake, frames).check_main_file(VIDEO, "video", ".mp4", ai_declared=False))
     assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
@@ -138,7 +139,7 @@ def test_a_tool_killed_at_its_timeout_accepts_the_video(hanging, tmp_path, caplo
 
 
 def test_a_probe_that_fails_quickly_refuses_the_video(tmp_path):
-    frames = VideoFrames(ProcessRunner(), ffprobe=tool(tmp_path, "ffprobe", "exit 1"))
+    frames = VideoFrames(ffmpeg_runner(), ffprobe=tool(tmp_path, "ffprobe", "exit 1"))
     with pytest.raises(BadRequest) as error:
         asyncio.run(detector(FakeSightengine(0.1), frames).check_main_file(VIDEO, "video", ".mp4", False))
     assert error.value.code == "unreadable_video"
