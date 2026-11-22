@@ -9,8 +9,20 @@ vérifiés par magic bytes (`storage.py:57`), noms de fichiers en SHA-256 filtr�
 CSP `default-src 'none'` + `nosniff` sur `/media`, liens privés signés HMAC à durée courte, rate limit
 par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 
+Relecture des correctifs le 2026-11-22 sur `develop` (`af790c5`, PR #24 et #25) : 18 à 24 corrigés, 1 et 3
+partiellement, les autres inchangés. Relecture du diff seulement : `pytest` non lancé (`uv` absent).
+
 ## 🔴 Sécurité / intégrité (priorité haute)
 
+- [ ] **1. Le badge « human proven » est gratuit** — *partiellement corrigé.*
+  - Fait : une preuve ne compte que si elle diffère de l'œuvre (fichier principal, GLB détaillé, poster)
+    et des autres preuves, par SHA-256 et, pour les images, par pHash (`works/service.py`,
+    `_distinct_evidence`).
+  - Reste : `ALLOW_IMPORTED_PROOFS_FOR_BADGE` vaut toujours `true` par défaut (`config.py`) et
+    `render.yaml` le force à `"true"` en prod. Deux images importées quelconques mais différentes donnent
+    encore le badge, donc le droit de vote (`votes/service.py:23`). Les preuves non-image (vidéo…) ne
+    sont comparées que par SHA-256 : modifier un octet suffit. → Passer à `false` en prod dès que la
+    capture signée de l'app Android est disponible.
 - [ ] **2. Vérification de l'attestation Android incomplète** (`devices/attestation.py:68`) :
   - aucune vérification que les certificats intermédiaires sont des CA (`BasicConstraints ca=True`,
     `keyCertSign`) : un attaquant qui possède une clé attestée légitime (son propre téléphone) pourrait
@@ -18,6 +30,14 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
     (plausible, à prouver par un test) ;
   - pas de contrôle de la liste de révocation Google des clés d'attestation ;
   - la présence de l'extension d'attestation sur un autre certificat que le leaf n'est pas refusée.
+- [ ] **3. Rate limit inefficace derrière Render** — *corrigé, hypothèse à confirmer.*
+  - Fait : `render.yaml` déclare `CLIENT_IP_HEADER=CF-Connecting-IP`, `PROOF_URL_SECRET`, `NONCE_SECRET`,
+    `ATTESTATION_PROVIDER` et `ALLOW_IMPORTED_PROOFS_FOR_BADGE`. Une valeur d'en-tête qui n'est pas une IP
+    retombe sur l'IP du socket (`rate_limit.py`, `client_key`).
+  - Reste : que Render place Cloudflare devant chaque service, et que Cloudflare réécrive toujours
+    `CF-Connecting-IP`, n'est pas documenté par Render (non vérifié, seulement des posts de la communauté).
+    → Confirmer en prod, par exemple en envoyant un `CF-Connecting-IP` forgé et en vérifiant qu'il n'est
+    pas pris comme clé.
 - [ ] **4. Endpoints coûteux sans rate limit** : `POST /works` (jusqu'à 6 × 20 Mo en mémoire + CLIP),
   `POST /votes`, `PUT /me/artist`, `POST /expositions`. Chaque `POST /works` refusé pour copie crée en
   plus un `ReviewCase` en base (`integrity/service.py:65`) → la table peut être spammée.
@@ -66,9 +86,11 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 - [x] **18. Détection pHash en scan complet** : PostgreSQL calcule la distance exacte et renvoie
   les meilleures correspondances par groupe. Quatre index filtrent les candidats pour les seuils
   jusqu'à 11 bits, dont le seuil par défaut de 8. Les seuils supérieurs gardent le calcul SQL exact.
+  `bit_count` exige PostgreSQL 14 ou plus (version Neon non vérifiée).
 - [x] **19. `refresh` de l'index à chaque scan** : délai par processus configurable via
   `SCAN_INDEX_REFRESH_SECONDS` (15 s par défaut). Une publication invalide l'index local après validation
   de la transaction. Le contrôle des doublons continue d'actualiser l'index avant la comparaison.
+  L'invalidation reste locale : les autres instances voient une nouvelle œuvre au plus 15 s plus tard.
 - [x] **20. Listes non paginées** : `GET /expositions` et `GET /artists/{id}/museum` utilisent
   `limit` et `offset`. Le musée charge les preuves et calcule la salle pour les œuvres de la page.
 - [x] **21. CORS `allow_credentials=True`** : option retirée. Les origines configurées peuvent
@@ -77,10 +99,12 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
   journalisé au niveau debug sans le jeton, les claims ou le détail fourni par le client.
 - [x] **23. Rate limit en mémoire par processus** : les instances partagent les compteurs lorsque
   `RATE_LIMIT_REDIS_URL` est configurée. Sans cette variable, les compteurs restent locaux au processus.
-- [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `redis`, `sse-starlette`,
-  `pyacoustid` et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`. Le point 23 réintroduit
-  `redis` pour les compteurs partagés.
+  Redis configuré mais injoignable : les endpoints limités répondent 503 (choix fail-closed).
+  `RATE_LIMIT_REDIS_URL` n'est pas dans `render.yaml` : compteurs locaux en prod (une seule instance).
+- [x] **24. Dépendances déclarées mais non importées** : retrait de `celery`, `sse-starlette`, `pyacoustid`
+  et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`. `redis` est conservé : le point 23
+  l'utilise pour les compteurs partagés.
 
 ## Ordre suggéré
 
-5, 12 et 13 d'abord (intégrité du concours, disponibilité en prod), puis 2, 4 et 16.
+5, 12 et 13 d'abord (disponibilité en prod), puis la fin du 1 (intégrité du concours), puis 2, 4 et 16.
