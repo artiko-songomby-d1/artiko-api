@@ -157,8 +157,12 @@ paths:
         - { name: exposition_id, in: query, schema: { type: string, format: uuid } }
         - name: q
           in: query
-          description: Words to find in the title, the story or the artist's name, ignoring case
-          schema: { type: string, maxLength: 100 }
+          description: |
+            Text to find in the title, the story or the artist's name, combined with the other filters.
+            Surrounding spaces are ignored and a blank value filters nothing. `%` and `_` match themselves.
+            Case is ignored as PostgreSQL `ILIKE` ignores it, by the database locale (`é` finds `É` under a UTF-8
+            locale); accents are not ignored (`e` does not find `é`).
+          schema: { type: string, maxLength: 100, pattern: "^[^\\x00]*$" }
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -169,6 +173,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Work" }
+        "422": { $ref: "#/components/responses/Invalid" }
     post:
       operationId: createWork
       tags: [works]

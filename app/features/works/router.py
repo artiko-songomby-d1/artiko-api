@@ -22,6 +22,8 @@ from app.platform.pagination import Paged
 from app.platform.rate_limit import SlidingWindowLimiter, limit_per_minute, user_key
 
 router = APIRouter(tags=["works"])
+# PostgreSQL text cannot hold a NUL character: refuse it with 422 instead of failing in the database.
+NO_NUL = r"^[^\x00]*$"
 claims_adapter = TypeAdapter(list[ProofClaimIn])
 
 
@@ -51,7 +53,7 @@ async def list_works(
     month: Annotated[str | None, Query(pattern=MONTH)] = None,
     artist_id: uuid.UUID | None = None,
     exposition_id: uuid.UUID | None = None,
-    q: Annotated[str | None, Query(max_length=100)] = None,
+    q: Annotated[str | None, Query(max_length=100, pattern=NO_NUL)] = None,
 ) -> list[WorkOut]:
     return await search_works(db, category, month, artist_id, exposition_id, q, page, viewer)
 

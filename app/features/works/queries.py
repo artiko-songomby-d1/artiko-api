@@ -79,12 +79,12 @@ async def search_works(
         q = q.where(Work.artist_id == artist_id)
     if exposition_id:
         q = q.where(Work.exposition_id == exposition_id)
-    if text:
+    if text and (needle := text.strip()):
         q = q.where(
             or_(
-                Work.title.icontains(text, autoescape=True),
-                Work.story.icontains(text, autoescape=True),
-                Artist.display_name.icontains(text, autoescape=True),
+                Work.title.icontains(needle, autoescape=True),
+                Work.story.icontains(needle, autoescape=True),
+                Artist.display_name.icontains(needle, autoescape=True),
             )
         )
     q = q.limit(page.limit).offset(page.offset)
