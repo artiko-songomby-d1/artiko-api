@@ -11,11 +11,6 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 
 ## 🔴 Sécurité / intégrité (priorité haute)
 
-- [ ] **1. Le badge « human proven » est gratuit.** `ALLOW_IMPORTED_PROOFS_FOR_BADGE=true` par défaut
-  (`config.py:64`, `works/service.py:131`) : deux fichiers importés quelconques suffisent, sans contrôle
-  qu'ils diffèrent entre eux ni du fichier de l'œuvre. Or le badge conditionne le vote
-  (`votes/service.py:23`) et le web envoie toujours des preuves importées. → Désactiver en prod, ou au
-  minimum exiger des preuves distinctes (SHA-256 / pHash) et différentes de l'œuvre.
 - [ ] **2. Vérification de l'attestation Android incomplète** (`devices/attestation.py:68`) :
   - aucune vérification que les certificats intermédiaires sont des CA (`BasicConstraints ca=True`,
     `keyCertSign`) : un attaquant qui possède une clé attestée légitime (son propre téléphone) pourrait
@@ -23,11 +18,6 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
     (plausible, à prouver par un test) ;
   - pas de contrôle de la liste de révocation Google des clés d'attestation ;
   - la présence de l'extension d'attestation sur un autre certificat que le leaf n'est pas refusée.
-- [ ] **3. Rate limit inefficace derrière Render.** `render.yaml` ne déclare pas `CLIENT_IP_HEADER`
-  (ni `PROOF_URL_SECRET`, `NONCE_SECRET`, `ATTESTATION_PROVIDER`, `ALLOW_IMPORTED_PROOFS_FOR_BADGE`).
-  Sans en-tête, `client_key` (`rate_limit.py:78`) prend l'IP du proxy Render : tous les visiteurs
-  partagent le même compteur (20 scans/min pour tout le monde). → Identifier l'en-tête fiable fourni par
-  Render (non vérifié) et compléter `render.yaml`.
 - [ ] **4. Endpoints coûteux sans rate limit** : `POST /works` (jusqu'à 6 × 20 Mo en mémoire + CLIP),
   `POST /votes`, `PUT /me/artist`, `POST /expositions`. Chaque `POST /works` refusé pour copie crée en
   plus un `ReviewCase` en base (`integrity/service.py:65`) → la table peut être spammée.
@@ -93,4 +83,4 @@ par client + global, test d'architecture, gitleaks en CI (sur `develop`).
 
 ## Ordre suggéré
 
-1, 3, 5, 12 et 13 d'abord (intégrité du concours, disponibilité en prod), puis 2, 4 et 16.
+5, 12 et 13 d'abord (intégrité du concours, disponibilité en prod), puis 2, 4 et 16.

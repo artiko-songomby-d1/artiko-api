@@ -1,7 +1,9 @@
 """Publishing a work: validate the files, fingerprint them, store them, embed the image."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from itertools import combinations
 
 from fastapi import UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -19,7 +21,7 @@ from app.platform.db import Db
 from app.platform.embed import embed
 from app.platform.errors import BadRequest, Conflict, Forbidden
 from app.platform.months import current_month
-from app.platform.phash import phash
+from app.platform.phash import distance, phash
 
 MAX_PROOFS = 5
 MIN_PROOFS_FOR_HUMAN = 2
@@ -57,17 +59,27 @@ async def publish_work(
     fingerprint = storage.sha256(data)
     if await db.scalar(select(Work.id).where(Work.sha256 == fingerprint)):
         raise Conflict("duplicate_work", "This exact file is already published on Artiko")
+    # Hashed before it is embedded: a picture that cannot be decoded is refused here, with a 400.
+    image_hash = await _image_hash(file, data) if kind == "image" else None
     embedding = (await run_in_threadpool(embed, data)).tolist() if kind == "image" else None
-    image_hash = await run_in_threadpool(phash, data) if kind == "image" else None
     earlier = await run_publish_checks(db, Candidate(artist.id, fingerprint, kind, embedding, image_hash))
     if proof_claims and len(proof_claims) != len(proof):
         raise BadRequest("invalid_proof_claims", "Send one claim for each proof file, in the same order")
     checked = []
+    prints = []
     for i, p in enumerate(proof):
         p_data = await storage.read_upload(p)
-        proof_ext = storage.kind_of(p, p_data)[1]
+        proof_kind, proof_ext = storage.kind_of(p, p_data)
+        proof_sha = storage.sha256(p_data)
         claim = proof_claims[i] if proof_claims else None
-        checked.append((p_data, proof_ext, await verify_proof(db, user.id, storage.sha256(p_data), claim)))
+        checked.append((p_data, proof_ext, await verify_proof(db, user.id, proof_sha, claim)))
+        prints.append(Fingerprint(proof_sha, await _image_hash(p, p_data) if proof_kind == "image" else None))
+    # Every file that makes up the work: none of them is evidence of how it was made.
+    work_files = [Fingerprint(fingerprint, image_hash)]
+    if hd:
+        work_files.append(Fingerprint(storage.sha256(hd[0]), None))
+    if still:
+        work_files.append(Fingerprint(storage.sha256(still[0]), await _image_hash(poster, still[0])))
     proofs = []
     now = datetime.now(UTC)
     for i, (p_data, proof_ext, evidence) in enumerate(checked):
@@ -102,7 +114,7 @@ async def publish_work(
         proofs=proofs,
         sha256=fingerprint,
         ai_declared=ai_declared,
-        human_proven=sum(_counts_for_badge(p) for p in proofs) >= MIN_PROOFS_FOR_HUMAN and not ai_declared,
+        human_proven=_distinct_evidence(work_files, proofs, prints) >= MIN_PROOFS_FOR_HUMAN and not ai_declared,
         month=current_month(),
         embedding=embedding,
         phash=image_hash,
@@ -152,3 +164,45 @@ async def _join_series(db: Db, earlier_id: uuid.UUID | None) -> uuid.UUID | None
 
 def _counts_for_badge(proof: WorkProof) -> bool:
     return proof.signed or (get_settings().allow_imported_proofs_for_badge and proof.source == "imported")
+
+
+@dataclass(frozen=True)
+class Fingerprint:
+    """What identifies the content of a file: its exact bytes and, for an image, what it looks like."""
+
+    sha256: str
+    phash: str | None
+
+
+def _same_content(a: Fingerprint, b: Fingerprint) -> bool:
+    """The same file, or the same picture resized or recompressed."""
+    if a.sha256 == b.sha256:
+        return True
+    if a.phash is None or b.phash is None:
+        return False
+    return distance(a.phash, b.phash) <= get_settings().publish_phash_max_distance
+
+
+async def _image_hash(upload: UploadFile, data: bytes) -> str:
+    """The pHash of an uploaded picture, or 400 when it opens but cannot be decoded (a truncated JPEG)."""
+    try:
+        return await run_in_threadpool(phash, data)
+    except (OSError, SyntaxError, ValueError) as e:
+        raise BadRequest("unsupported_file", f"{upload.filename}: the image cannot be read") from e
+
+
+def _distinct_evidence(work_files: list[Fingerprint], proofs: list[WorkProof], prints: list[Fingerprint]) -> int:
+    """How many proofs count for the badge. Showing how a work was made takes files that differ from the
+    finished work and from each other: sending the work itself, or one file several times, proves nothing.
+    The answer is the largest group of proofs that all differ from one another, so it does not depend on the
+    order they were sent in (at most MAX_PROOFS files, so every group can be tried)."""
+    eligible = [
+        content
+        for proof, content in zip(proofs, prints, strict=True)
+        if _counts_for_badge(proof) and not any(_same_content(content, part) for part in work_files)
+    ]
+    for size in range(len(eligible), 1, -1):
+        for group in combinations(eligible, size):
+            if not any(_same_content(a, b) for a, b in combinations(group, 2)):
+                return size
+    return min(len(eligible), 1)
