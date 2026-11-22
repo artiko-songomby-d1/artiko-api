@@ -100,6 +100,37 @@ production : bucket, pooler Neon, Render en non-root, vrai téléphone, Safari i
   et `pgvector` de `pyproject.toml`, avec régénération de `uv.lock`. `redis` est conservé : le point 23
   l'utilise pour les compteurs partagés.
 
+## 🔵 Relecture de `1942d23` (après le MVP)
+
+Relecture du 2026-11-22 de `1942d23` (poussé sur `develop` sans PR) par trois relecteurs : bugs, cas limites
+(exécutés sur Postgres local) et sécurité (gitleaks : aucune fuite). Les points 2, 4 à 7, 10, 11, 13 à 15 et 17
+tiennent. À traiter après la démo.
+
+- [ ] **25. Révocations Google en décimal ignorées** (`devices/attestation.py:121`, `revocation.py:26`) :
+  993 entrées sur 2211 de la liste réelle sont des nombres décimaux, or seule la forme hexadécimale est
+  comparée. Que ce soient des numéros de série décimaux n'est pas documenté par Google (non vérifié).
+  → Ajouter `format(int(key), "x")` pour les clés uniquement numériques, et normaliser les zéros de tête.
+- [ ] **26. Chaîne d'attestation malformée → 500** (`devices/attestation.py:69`, `:112`) : `InvalidVersion`
+  et une `ValueError` levée par `verifier.verify` ne sont pas attrapées (2 sur 250 mutations aléatoires).
+  Le détail de `cryptography` part aussi dans le message d'erreur 400.
+- [ ] **27. Point 12 inachevé** : `storage.is_image` (`scan/router.py:31`), `index.search` et `index.top`
+  (produit numpy) tournent encore dans l'event loop. → `run_in_threadpool`.
+- [ ] **28. Limites globales exploitables en déni de service** (`rate_limit.py:186`) : 6 comptes jetables à
+  10 publications par minute épuisent le plafond global de 60, et tout le monde reçoit 429 (même logique pour
+  votes, artistes, expositions). Le corps multipart est en plus reçu avant le rate limit. Lié au point 8.
+- [ ] **29. Plafonds d'image stricts** (`storage.py:55`) : WebP refusé au-delà d'environ 6 Mpx, PNG au-delà
+  de 17 Mpx, JPEG progressif au-delà de 14 Mpx. Décision produit : relever ou rendre configurable par format.
+- [ ] **30. L'attestation ne prouve ni un téléphone sain ni notre application** (antérieur au commit) :
+  `RootOfTrust` et `attestationApplicationId` ne sont pas lus, et `INTEGRITY_PROVIDER=none`. Préalable au
+  passage de `ALLOW_IMPORTED_PROOFS_FOR_BADGE` à `false` (point 1).
+- [ ] **31. Mineurs** :
+  - au premier chargement de la liste de révocation, les enregistrements concurrents reçoivent 503 ;
+  - une limite à 0 laisse passer une requête en mémoire, aucune avec Redis ;
+  - `display_name` contenant un caractère NUL → 500 ;
+  - tout `IntegrityError` est traduit en `duplicate_work` (`works/service.py:143`) ;
+  - transaction ouverte pendant les envois S3, et fichiers orphelins si un envoi ou le `commit` échoue ;
+  - la révocation n'est vérifiée qu'à l'enregistrement de l'appareil, jamais à la capture.
+
 ## Ordre suggéré
 
 Merger #27 (9 et 16) puis #29 (8). Ensuite : la confirmation du 3 en prod, l'activation du vote réservé aux
